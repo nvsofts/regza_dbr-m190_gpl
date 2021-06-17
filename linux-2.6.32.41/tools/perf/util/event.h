@@ -96,7 +96,7 @@ static inline u64 vdso__map_ip(struct map *map __used, u64 ip)
 	return ip;
 }
 
-struct map *map__new(struct mmap_event *event, char *cwd, int cwdlen);
+struct map *map__new(struct mmap_event *event);
 struct map *map__clone(struct map *self);
 int map__overlap(struct map *l, struct map *r);
 size_t map__fprintf(struct map *self, FILE *fp);

@@ -5,6 +5,7 @@
  *    Copyright (C) 1999 IBM Deutschland Entwicklung GmbH, IBM Corporation
  *    Author(s): Hartmut Penner (hp@de.ibm.com)
  *               Ulrich Weigand (uweigand@de.ibm.com)
+ *  Portions added by T. Halloran: (C) Copyright 2002 IBM Poughkeepsie, IBM Corporation
  *
  *  Derived from "arch/i386/mm/fault.c"
  *    Copyright (C) 1995  Linus Torvalds
@@ -30,6 +31,7 @@
 #include <linux/kprobes.h>
 #include <linux/uaccess.h>
 #include <linux/hugetlb.h>
+#include <trace/fault.h>
 #include <asm/system.h>
 #include <asm/pgtable.h>
 #include <asm/s390_ext.h>
@@ -51,6 +53,11 @@
 #ifdef CONFIG_SYSCTL
 extern int sysctl_userprocess_debug;
 #endif
+
+DEFINE_TRACE(page_fault_entry);
+DEFINE_TRACE(page_fault_exit);
+DEFINE_TRACE(page_fault_nosem_entry);
+DEFINE_TRACE(page_fault_nosem_exit);
 
 #ifdef CONFIG_KPROBES
 static inline int notify_page_fault(struct pt_regs *regs, long err)
@@ -352,7 +359,10 @@ good_area:
 	 * make sure we exit gracefully rather than endlessly redo
 	 * the fault.
 	 */
+	trace_page_fault_entry(regs, error_code & 0xffff, mm, vma, address,
+			       write);
 	fault = handle_mm_fault(mm, vma, address, write ? FAULT_FLAG_WRITE : 0);
+	trace_page_fault_exit(fault);
 	if (unlikely(fault & VM_FAULT_ERROR)) {
 		if (fault & VM_FAULT_OOM) {
 			up_read(&mm->mmap_sem);
@@ -390,9 +400,12 @@ bad_area:
 
 	/* User mode accesses just cause a SIGSEGV */
 	if (regs->psw.mask & PSW_MASK_PSTATE) {
+		trace_page_fault_nosem_entry(regs, error_code & 0xffff,
+					     address);
 		tsk->thread.prot_addr = address;
 		tsk->thread.trap_no = error_code;
 		do_sigsegv(regs, error_code, si_code, address);
+		trace_page_fault_nosem_exit();
 		return;
 	}
 

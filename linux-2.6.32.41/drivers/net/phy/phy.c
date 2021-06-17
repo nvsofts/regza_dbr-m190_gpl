@@ -198,6 +198,13 @@ static inline int phy_find_valid(int idx, u32 features)
 	while (idx < MAX_NUM_SETTINGS && !(settings[idx].setting & features))
 		idx++;
 
+	if (idx == MAX_NUM_SETTINGS) {
+		idx = 0;
+		while (idx < MAX_NUM_SETTINGS &&
+		       !(settings[idx].setting & features))
+			idx++;
+	}
+
 	return idx < MAX_NUM_SETTINGS ? idx : MAX_NUM_SETTINGS - 1;
 }
 
@@ -355,6 +362,7 @@ int phy_mii_ioctl(struct phy_device *phydev,
 		
 		if (mii_data->reg_num == MII_BMCR 
 				&& val & BMCR_RESET
+				&& phydev->drv
 				&& phydev->drv->config_init) {
 			phy_scan_fixups(phydev);
 			phydev->drv->config_init(phydev);
@@ -754,8 +762,19 @@ void phy_start(struct phy_device *phydev)
 	}
 	mutex_unlock(&phydev->lock);
 }
+
+void phy_start_fast(struct phy_device *phydev)
+{
+	mutex_lock(&phydev->lock);
+	phydev->state = PHY_CHANGELINK;
+	mutex_unlock(&phydev->lock);
+	cancel_delayed_work_sync(&phydev->state_queue);
+	schedule_delayed_work(&phydev->state_queue, 0);
+}
+
 EXPORT_SYMBOL(phy_stop);
 EXPORT_SYMBOL(phy_start);
+EXPORT_SYMBOL(phy_start_fast);
 
 /**
  * phy_state_machine - Handle the state machine

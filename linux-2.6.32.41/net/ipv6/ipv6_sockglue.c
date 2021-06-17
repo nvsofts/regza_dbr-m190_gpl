@@ -602,11 +602,20 @@ done:
 			omode = MCAST_EXCLUDE;
 			add = 0;
 		} else if (optname == MCAST_JOIN_SOURCE_GROUP) {
+#ifndef CONFIG_TOSHIBA_IPTV_MLDV2_FOR_STB
 			struct sockaddr_in6 *psin6;
 
 			psin6 = (struct sockaddr_in6 *)&greqs.gsr_group;
 			retv = ipv6_sock_mc_join(sk, greqs.gsr_interface,
 				&psin6->sin6_addr);
+#else
+			struct sockaddr_in6 *psin6, *qsin6;
+
+			psin6 = (struct sockaddr_in6 *)&greqs.gsr_group;
+			qsin6 = (struct sockaddr_in6 *)&greqs.gsr_source;
+			retv = ipv6_sock_mc_join_ssm(sk, greqs.gsr_interface,
+				&psin6->sin6_addr, &qsin6->sin6_addr);
+#endif
 			/* prior join w/ different source is ok */
 			if (retv && retv != -EADDRINUSE)
 				break;

@@ -695,5 +695,48 @@ struct list_head *seq_list_next(void *v, struct list_head *head, loff_t *ppos)
 	++*ppos;
 	return lh == head ? NULL : lh;
 }
-
 EXPORT_SYMBOL(seq_list_next);
+
+struct list_head *seq_sorted_list_start(struct list_head *head, loff_t *ppos)
+{
+	struct list_head *lh;
+
+	list_for_each(lh, head)
+		if ((unsigned long)lh >= *ppos) {
+			*ppos = (unsigned long)lh;
+			return lh;
+		}
+	return NULL;
+}
+EXPORT_SYMBOL(seq_sorted_list_start);
+
+struct list_head *seq_sorted_list_start_head(struct list_head *head,
+		loff_t *ppos)
+{
+	struct list_head *lh;
+
+	if (!*ppos) {
+		*ppos = (unsigned long)head;
+		return head;
+	}
+	list_for_each(lh, head)
+		if ((unsigned long)lh >= *ppos) {
+			*ppos = (long)lh->prev;
+			return lh->prev;
+		}
+	return NULL;
+}
+EXPORT_SYMBOL(seq_sorted_list_start_head);
+
+struct list_head *seq_sorted_list_next(void *p, struct list_head *head,
+		loff_t *ppos)
+{
+	struct list_head *lh;
+	void *next;
+
+	lh = ((struct list_head *)p)->next;
+	next = (lh == head) ? NULL : lh;
+	*ppos = next ? ((unsigned long)next) : (-1UL);
+	return next;
+}
+EXPORT_SYMBOL(seq_sorted_list_next);

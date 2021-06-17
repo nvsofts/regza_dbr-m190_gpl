@@ -55,6 +55,10 @@ KBUILD_CFLAGS += -m64 -pipe -mno-fpu -mcpu=ultrasparc -mcmodel=medlow   \
 KBUILD_CFLAGS += $(call cc-option,-mtune=ultrasparc3)
 KBUILD_AFLAGS += -m64 -mcpu=ultrasparc -Wa,--undeclared-regs
 
+# gcc 3.x has problems with passing symbol+offset in
+# asm "i" constraint.
+export USE_IMMEDIATE := $(call cc-ifversion, -ge, 0400, $(CONFIG_IMMEDIATE))
+
 ifeq ($(CONFIG_MCOUNT),y)
   KBUILD_CFLAGS += -pg
 endif
@@ -75,7 +79,7 @@ drivers-$(CONFIG_OPROFILE)	+= arch/sparc/oprofile/
 # Export what is needed by arch/sparc/boot/Makefile
 export VMLINUX_INIT VMLINUX_MAIN
 VMLINUX_INIT := $(head-y) $(init-y)
-VMLINUX_MAIN := $(core-y) kernel/ mm/ fs/ ipc/ security/ crypto/ block/
+VMLINUX_MAIN := $(core-y) kernel/ mm/ fs/ ipc/ security/ crypto/ block/ ltt/
 VMLINUX_MAIN += $(patsubst %/, %/lib.a, $(libs-y)) $(libs-y)
 VMLINUX_MAIN += $(drivers-y) $(net-y)
 

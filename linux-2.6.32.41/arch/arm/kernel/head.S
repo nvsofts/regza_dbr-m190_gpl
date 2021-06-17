@@ -82,11 +82,25 @@ ENTRY(stext)
 	bl	__lookup_processor_type		@ r5=procinfo r9=cpuid
 	movs	r10, r5				@ invalid processor (r5=0)?
 	beq	__error_p			@ yes, error 'p'
+
+	/* store device tree pointer */
+	adr	r5, __devtree_pointer
+	str	r2, [r5]
+
+	/* If we're using the device tree for machine detection (indicated by
+	 * r1 == MACH_TYPE_DT == 0xffffffff), we don't look for a machinfo
+	 * here, as we'll lookup one based on the device tree in setup_arch().
+	 * Also, we don't need to call __vet_atags.
+	 */
+	adds	r3, r1, #1
+	bcs	1f
+
 	bl	__lookup_machine_type		@ r5=machinfo
 	movs	r8, r5				@ invalid machine (r5=0)?
 	beq	__error_a			@ yes, error 'a'
+
 	bl	__vet_atags
-	bl	__create_page_tables
+1:	bl	__create_page_tables
 
 	/*
 	 * The following calls CPU specific code in a position independent
@@ -150,7 +164,10 @@ __secondary_data:
 	.long	__secondary_switched
 #endif /* defined(CONFIG_SMP) */
 
-
+	.type __devtree_pointer, %object
+	.globl __devtree_pointer
+__devtree_pointer:
+	.long	0
 
 /*
  * Setup common bits before finally enabling the MMU.  Essentially

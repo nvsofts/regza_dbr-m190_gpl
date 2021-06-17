@@ -710,6 +710,17 @@ static int mtd_ioctl(struct inode *inode, struct file *file,
 		break;
 	}
 
+#ifdef CONFIG_MTD_CHAR_MEMSETFORCEERASE
+	case MEMSETFORCEERASE:
+	{
+		int flag_force;
+		if (copy_from_user(&flag_force, argp, sizeof(int)))
+			return -EFAULT;
+		mtd->flag_force_erase_badblock = flag_force;
+		break;
+	}
+#endif
+
 #ifdef CONFIG_HAVE_MTD_OTP
 	case OTPSELECT:
 	{
@@ -814,6 +825,83 @@ static int mtd_ioctl(struct inode *inode, struct file *file,
 		file->f_pos = 0;
 		break;
 	}
+
+#if defined(CONFIG_MTD_NAND) || defined(CONFIG_MTD_NAND_MODULE)
+	case MEMGETERRSTAT:
+	{
+		struct nand_errstat esi;
+		struct nand_errstat_cmd *esc;
+		size_t count;
+		size_t size;
+
+		if (!mtd->errstat_get)
+			return -EOPNOTSUPP;
+
+		if (copy_from_user(&esi, argp, sizeof(struct nand_errstat)))
+			return -EFAULT;
+
+		ret = mtd->errstat_get(mtd, esi.state, &esc, &count);
+		if (ret < 0)
+			break;
+
+		if ((esi.count > 0) && (esi.addr != NULL)) {
+			if (esi.count < count)
+				return -ERANGE;
+
+			size = sizeof(struct nand_errstat_cmd) * count;
+			if (!access_ok(VERIFY_WRITE, esi.addr, size))
+				return -EFAULT;
+
+			if (copy_to_user(esi.addr, esc, size))
+				return -EFAULT;
+		}
+
+		esi.count = count;
+
+		if (copy_to_user(argp, &esi, sizeof(struct nand_errstat)))
+			return -EFAULT;
+		break;
+	}
+
+	case MEMSETERRSTAT:
+	{
+		struct nand_errstat esi;
+		struct nand_errstat_cmd *esc;
+		size_t size;
+
+		if (!mtd->errstat_set)
+			return -EOPNOTSUPP;
+
+		if (argp == NULL) {
+			ret = mtd->errstat_set(mtd, -1, NULL, 0);
+			break;
+		}
+
+		if (copy_from_user(&esi, argp, sizeof(struct nand_errstat)))
+			return -EFAULT;
+
+		if (esi.count > 0) {
+			size = sizeof(struct nand_errstat_cmd) * esi.count;
+			if (!access_ok(VERIFY_READ, esi.addr, size))
+				return -EFAULT;
+
+			esc = kmalloc(size + sizeof(struct nand_errstat_cmd),
+				      GFP_KERNEL);
+			if (!esc)
+				return -ENOMEM;
+
+			if (copy_from_user(esc, esi.addr, size))
+				return -EFAULT;
+
+			esc[esi.count].maf_id = -1;
+		} else {
+			esc = NULL;
+		}
+
+		ret = mtd->errstat_set(mtd, esi.state, esc, esi.count);
+		break;
+	}
+#endif	/* CONFIG_MTD_NAND || CONFIG_MTD_NAND_MODULE */
 
 	default:
 		ret = -ENOTTY;

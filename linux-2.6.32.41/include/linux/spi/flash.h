@@ -25,6 +25,23 @@ struct flash_platform_data {
 
 	char		*type;
 
+#if defined(CONFIG_SPI_TC90431) || defined(CONFIG_SPI_TC90431_MODULE)
+	unsigned long size;
+	unsigned long phys;
+	unsigned long virt;
+
+	unsigned char read_opcode;
+#define OPCODE_FAST_READ_SINGLE      0x0b
+#define OPCODE_FAST_READ_DUAL_OUTPUT 0x3b
+#define OPCODE_FAST_READ_DUAL_IO     0xbb
+#define OPCODE_FAST_READ_QUAD_OUTPUT 0x6b
+#define OPCODE_FAST_READ_QUAD_IO     0xeb
+#define OPCODE_AUTO                  0x9f
+/* SPI cmd 0x9f is generally 'Read JEDEC ID', so never used as Read command */
+
+	unsigned char dummy_count;
+	unsigned char flash_initialized;
+#endif
 	/* we'll likely add more ... use JEDEC IDs, etc */
 };
 

@@ -99,6 +99,26 @@ static void cramfs_drop_inode(struct inode *inode)
 		generic_drop_inode(inode);
 }
 
+#ifdef CONFIG_CRAMFS_LINEAR
+/*
+ * Return a pointer to the block in the linearly addressed cramfs image.
+ */
+static void *cramfs_read(struct super_block *sb, unsigned int offset, unsigned int len)
+{
+	struct cramfs_sb_info *sbi = CRAMFS_SB(sb);
+
+	if (!len)
+		return NULL;
+
+	if ((offset + len > sbi->size) || (offset > sbi->size) ||
+	    (len > sbi->size))
+		return NULL;
+
+	return (void *)(sbi->linear_virt_addr + offset);
+}
+
+#else /* Not linear addressing - aka regular block mode. */
+
 /*
  * We have our own block cache: don't fill up the buffer cache
  * with the rom-image, because the way the filesystem is set
@@ -207,6 +227,8 @@ static void *cramfs_read(struct super_block *sb, unsigned int offset, unsigned i
 	return read_buffers[buffer] + offset;
 }
 
+#endif /* CONFIG_CRAMFS_LINEAR */
+
 static void cramfs_put_super(struct super_block *sb)
 {
 	kfree(sb->s_fs_info);
@@ -221,7 +243,11 @@ static int cramfs_remount(struct super_block *sb, int *flags, char *data)
 
 static int cramfs_fill_super(struct super_block *sb, void *data, int silent)
 {
+#ifndef CONFIG_CRAMFS_LINEAR
 	int i;
+#else
+	char *p;
+#endif
 	struct cramfs_super super;
 	unsigned long root_offset;
 	struct cramfs_sb_info *sbi;
@@ -234,11 +260,47 @@ static int cramfs_fill_super(struct super_block *sb, void *data, int silent)
 		return -ENOMEM;
 	sb->s_fs_info = sbi;
 
+#ifndef CONFIG_CRAMFS_LINEAR
 	/* Invalidate the read buffers on mount: think disk change.. */
 	mutex_lock(&read_mutex);
 	for (i = 0; i < READ_BUFFERS; i++)
 		buffer_blocknr[i] = -1;
+#else /* CONFIG_CRAMFS_LINEAR */
+	/*
+	 * The physical location of the cramfs image is specified as
+	 * a mount parameter.  This parameter is mandatory for obvious
+	 * reasons.  Some validation is made on the phys address but this
+	 * is not exhaustive and we count on the fact that someone using
+	 * this feature is supposed to know what he/she's doing.
+	 */
+	if (!data || !(p = strstr((char *)data, "physaddr="))) {
+		printk(KERN_ERR "cramfs: unknown physical address for linear cramfs image\n");
+		goto out;
+	}
+	sbi->linear_phys_addr = simple_strtoul(p + 9, NULL, 0);
+	if (sbi->linear_phys_addr & (PAGE_SIZE-1)) {
+		printk(KERN_ERR "cramfs: physical address 0x%lx for linear cramfs isn't aligned to a page boundary\n",
+		       sbi->linear_phys_addr);
+		goto out;
+	}
+	if (sbi->linear_phys_addr == 0) {
+		printk(KERN_ERR "cramfs: physical address for linear cramfs image can't be 0\n");
+		goto out;
+	}
+	printk(KERN_INFO "cramfs: checking physical address 0x%lx for linear cramfs image\n",
+	       sbi->linear_phys_addr);
 
+	/* Map only one page for now.  Will remap it when fs size is known. */
+	sbi->size = PAGE_SIZE;
+	sbi->linear_virt_addr =
+		ioremap(sbi->linear_phys_addr, sbi->size);
+	if (!sbi->linear_virt_addr) {
+		printk(KERN_ERR "cramfs: ioremap of the linear cramfs image failed\n");
+		goto out;
+	}
+
+	mutex_lock(&read_mutex);
+#endif /* CONFIG_CRAMFS_LINEAR */
 	/* Read the first block and get the superblock from it */
 	memcpy(&super, cramfs_read(sb, 0, sizeof(super)), sizeof(super));
 	mutex_unlock(&read_mutex);
@@ -308,8 +370,29 @@ static int cramfs_fill_super(struct super_block *sb, void *data, int silent)
 		iput(root);
 		goto out;
 	}
+#ifdef CONFIG_CRAMFS_LINEAR
+	/* Remap the whole filesystem now */
+	iounmap(sbi->linear_virt_addr);
+	printk(KERN_INFO "cramfs: linear cramfs image appears to be %lu KB in size\n",
+	       sbi->size/1024);
+#ifdef CONFIG_ARM
+	sbi->linear_virt_addr =
+		ioremap_cached(sbi->linear_phys_addr, sbi->size);
+#else /* CONFIG_ARM */
+	sbi->linear_virt_addr =
+		ioremap(sbi->linear_phys_addr, sbi->size);
+#endif /* CONFIG_ARM */
+	if (!sbi->linear_virt_addr) {
+		printk(KERN_ERR "cramfs: ioremap of the linear cramfs image failed\n");
+		goto out;
+	}
+#endif /* CONFIG_CRAMFS_LINEAR */
 	return 0;
 out:
+#ifdef CONFIG_CRAMFS_LINEAR
+	if (sbi->linear_virt_addr)
+		iounmap(sbi->linear_virt_addr);
+#endif /* CONFIG_CRAMFS_LINEAR */
 	kfree(sbi);
 	sb->s_fs_info = NULL;
 	return -EINVAL;
@@ -318,8 +401,11 @@ out:
 static int cramfs_statfs(struct dentry *dentry, struct kstatfs *buf)
 {
 	struct super_block *sb = dentry->d_sb;
+#ifndef CONFIG_CRAMFS_LINEAR
 	u64 id = huge_encode_dev(sb->s_bdev->bd_dev);
-
+#else
+	u64 id = 0ULL;
+#endif
 	buf->f_type = CRAMFS_MAGIC;
 	buf->f_bsize = PAGE_CACHE_SIZE;
 	buf->f_blocks = CRAMFS_SB(sb)->blocks;
@@ -548,15 +634,23 @@ static const struct super_operations cramfs_ops = {
 static int cramfs_get_sb(struct file_system_type *fs_type,
 	int flags, const char *dev_name, void *data, struct vfsmount *mnt)
 {
+#ifdef CONFIG_CRAMFS_LINEAR
+	return get_sb_nodev(fs_type, flags, data, cramfs_fill_super, mnt);
+#else
 	return get_sb_bdev(fs_type, flags, dev_name, data, cramfs_fill_super,
 			   mnt);
+#endif
 }
 
 static struct file_system_type cramfs_fs_type = {
 	.owner		= THIS_MODULE,
 	.name		= "cramfs",
 	.get_sb		= cramfs_get_sb,
+#ifdef CONFIG_CRAMFS_LINEAR
+	.kill_sb	= kill_anon_super,
+#else
 	.kill_sb	= kill_block_super,
+#endif
 	.fs_flags	= FS_REQUIRES_DEV,
 };
 

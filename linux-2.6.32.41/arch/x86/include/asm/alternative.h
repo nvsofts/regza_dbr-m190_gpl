@@ -159,5 +159,7 @@ static inline void apply_paravirt(struct paravirt_patch_site *start,
  * inconsistent instruction while you patch.
  */
 extern void *text_poke(void *addr, const void *opcode, size_t len);
+extern void *text_poke_early(void *addr, const void *opcode, size_t len);
+extern void add_nops(void *insns, unsigned int len);
 
 #endif /* _ASM_X86_ALTERNATIVE_H */

@@ -161,6 +161,10 @@ config UNIXWARE_DISKLABEL
 
 	  If you don't know what all this is about, say N.
 
+config NOMBR_PARTITION
+	bool "No MBR partition support"
+	depends on PARTITION_ADVANCED && MSDOS_PARTITION
+
 config LDM_PARTITION
 	bool "Windows Logical Disk Manager (Dynamic Disk) support"
 	depends on PARTITION_ADVANCED
@@ -249,3 +253,8 @@ config SYSV68_PARTITION
 	  partition table format used by Motorola Delta machines (using
 	  sysv68).
 	  Otherwise, say N.
+
+config ARBITRARY_PARTITION
+	bool "Arbitrary (command line) Partition support"
+	default n
+	depends on PARTITION_ADVANCED

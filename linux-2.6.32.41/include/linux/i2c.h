@@ -196,6 +196,9 @@ struct i2c_client {
 	struct device dev;		/* the device structure		*/
 	int irq;			/* irq issued by device		*/
 	struct list_head detected;
+#ifdef CONFIG_I2C_TC90431
+	void *data;
+#endif
 };
 #define to_i2c_client(d) container_of(d, struct i2c_client, dev)
 

@@ -1323,7 +1323,7 @@ static int __init ip_auto_config(void)
 		return 0;
 
 	DBG(("IP-Config: Entered.\n"));
-#ifdef IPCONFIG_DYNAMIC
+#if defined(IPCONFIG_DYNAMIC) || defined(CONFIG_ROOT_NFS)
  try_try_again:
 #endif
 	/* Give hardware a chance to settle */
@@ -1331,7 +1331,11 @@ static int __init ip_auto_config(void)
 
 	/* Setup all network devices */
 	if (ic_open_devs() < 0)
+#if defined(CONFIG_ROOT_NFS)
+		goto try_try_again;
+#else
 		return -1;
+#endif
 
 	/* Give drivers a chance to settle */
 	ssleep(CONF_POST_OPEN);

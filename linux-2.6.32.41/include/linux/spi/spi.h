@@ -69,6 +69,9 @@ struct spi_device {
 	struct device		dev;
 	struct spi_master	*master;
 	u32			max_speed_hz;
+#if defined(CONFIG_SPI_TC90431) || defined(CONFIG_SPI_TC90431_MODULE)
+	u32			max_speed_map_read;
+#endif
 	u8			chip_select;
 	u8			mode;
 #define	SPI_CPHA	0x01			/* clock phase */
@@ -290,6 +293,10 @@ struct spi_master {
 	 */
 	int			(*transfer)(struct spi_device *spi,
 						struct spi_message *mesg);
+#if defined(CONFIG_SPI_TC90431) || defined(CONFIG_SPI_TC90431_MODULE)
+	int			(*map_read)(struct spi_device *spi,
+						struct spi_message *mesg);
+#endif
 
 	/* called on release() to free memory provided by spi_master */
 	void			(*cleanup)(struct spi_device *spi);

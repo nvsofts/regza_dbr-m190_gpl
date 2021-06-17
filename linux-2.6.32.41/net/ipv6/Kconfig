@@ -218,3 +218,8 @@ config IPV6_PIMSM_V2
 	  If unsure, say N.
 
 endif # IPV6
+
+config TOSHIBA_IPTV_MLDV2_FOR_STB
+	bool "JUST for IPTV dual rcv fnc(kestrel) mlt src SSM ONLY"
+	depends on IPV6
+	default y

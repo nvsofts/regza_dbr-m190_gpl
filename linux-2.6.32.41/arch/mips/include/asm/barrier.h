@@ -152,4 +152,10 @@
 #define smp_llsc_rmb()	__asm__ __volatile__(__WEAK_LLSC_MB : : :"memory")
 #define smp_llsc_wmb()	__asm__ __volatile__(__WEAK_LLSC_MB : : :"memory")
 
+/*
+ * MIPS does not have any instruction to serialize instruction execution on the
+ * core.
+ */
+#define sync_core()
+
 #endif /* __ASM_BARRIER_H */

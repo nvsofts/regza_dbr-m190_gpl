@@ -1,7 +1,7 @@
 #include "cache.h"
 #include "color.h"
 
-int perf_use_color_default = -1;
+int perf_use_color_default = 0; /* disabled by default */
 
 static int parse_color(const char *name, int len)
 {

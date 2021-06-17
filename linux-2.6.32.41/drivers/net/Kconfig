@@ -2483,6 +2483,34 @@ config S6GMAC
 	  To compile this driver as a module, choose M here. The module
 	  will be called s6gmac.
 
+config TXSSETH
+	bool "TX Sub System Gbit ethernet controller"
+	depends on NET_ETHERNET && (TOSHIBA_TC90416 || TOSHIBA_TC90431)
+	select PHYLIB
+	default n
+
+config TXSSETH_RGMII
+        bool "Use RGMII PHY Interface mode"
+	depends on TXSSETH
+	default n
+
+config TXSSETH_TC90431EVABOARD_WAR
+        bool "TC90431 eva-board workaround: Ignore Data reception error by RXCTL"
+	depends on TXSSETH_RGMII
+	default n
+
+config TXSSETH_GBIT_SUPPORT
+        bool "Support Gigabit ethernet"
+	depends on TXSSETH
+	default n
+
+config TXSSETH_ETHERMAC_WORKAROUND
+	bool "Apply workaround for EtherMAC bus bridge HW error"
+	default n
+	depends on TXSSETH && TOSHIBA_TC90416
+	help
+	  If unsure, say N.
+
 source "drivers/net/stmmac/Kconfig"
 
 endif # NETDEV_1000
@@ -3240,5 +3268,22 @@ config VMXNET3
          This driver supports VMware's vmxnet3 virtual ethernet NIC.
          To compile this driver as a module, choose M here: the
          module will be called vmxnet3.
+
+config NETCPURATE
+	bool "Networking CPU Rate"
+	select NETPOLL
+	depends on NETDEVICES
+
+config NETCPURATE_OPTION
+	string "Networking CPU Rate Option"
+	depends on NETCPURATE
+	---help---
+	For example
+	"6663@192.168.0.1/eth0,6664@192.168.0.2/00:11:22:33:44:55".
+
+config NETCPURATE_SCHED_PRIO
+	int "Priority setting <0..99> (default is the highest priority)"
+	depends on NETCPURATE
+	default "99"
 
 endif # NETDEVICES

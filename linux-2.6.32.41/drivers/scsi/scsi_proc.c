@@ -61,7 +61,19 @@ static int proc_scsi_read(char *buffer, char **start, off_t offset,
 	struct Scsi_Host *shost = data;
 	int n;
 
+#ifdef CONFIG_SCSI_PROC_FS_REMOVE_CHECK
+	mutex_lock(&global_host_template_mutex);
+	n = 0;
+	if (scsi_host_lookup(shost->host_no) == shost) {
+		if (shost->hostt->proc_info)
+			n = shost->hostt->proc_info(shost, buffer, start,
+						    offset, length, 0);
+		scsi_host_put(shost);
+	}
+	mutex_unlock(&global_host_template_mutex);
+#else
 	n = shost->hostt->proc_info(shost, buffer, start, offset, length, 0);
+#endif
 	*eof = (n < length);
 
 	return n;
@@ -90,7 +102,19 @@ static int proc_scsi_write_proc(struct file *file, const char __user *buf,
 		ret = -EFAULT;
 		if (copy_from_user(page, buf, count))
 			goto out;
+#ifdef CONFIG_SCSI_PROC_FS_REMOVE_CHECK
+		mutex_lock(&global_host_template_mutex);
+		if (scsi_host_lookup(shost->host_no) == shost) {
+			if (shost->hostt->proc_info)
+				ret = shost->hostt->proc_info(shost, page,
+							      &start, 0,
+							      count, 1);
+			scsi_host_put(shost);
+		}
+		mutex_unlock(&global_host_template_mutex);
+#else
 		ret = shost->hostt->proc_info(shost, page, &start, 0, count, 1);
+#endif
 	}
 out:
 	free_page((unsigned long)page);
@@ -175,7 +199,13 @@ void scsi_proc_host_rm(struct Scsi_Host *shost)
 		return;
 
 	sprintf(name,"%d", shost->host_no);
+#ifdef CONFIG_SCSI_PROC_FS_REMOVE_CHECK
+	mutex_lock(&global_host_template_mutex);
+#endif
 	remove_proc_entry(name, shost->hostt->proc_dir);
+#ifdef CONFIG_SCSI_PROC_FS_REMOVE_CHECK
+	mutex_unlock(&global_host_template_mutex);
+#endif
 }
 /**
  * proc_print_scsidevice - return data about this host

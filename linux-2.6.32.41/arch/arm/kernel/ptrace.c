@@ -17,12 +17,18 @@
 #include <linux/user.h>
 #include <linux/security.h>
 #include <linux/init.h>
+#include <linux/module.h>
+#include <linux/marker.h>
+#include <linux/kallsyms.h>
 #include <linux/signal.h>
 #include <linux/uaccess.h>
+#include <trace/syscall.h>
+#include <linux/regset.h>
 
 #include <asm/pgtable.h>
 #include <asm/system.h>
 #include <asm/traps.h>
+#include <asm/unistd.h>
 
 #include "ptrace.h"
 
@@ -51,6 +57,30 @@
 #define BREAKINST_ARM	0xe7f001f0
 #define BREAKINST_THUMB	0xde01
 #endif
+
+DEFINE_TRACE(syscall_entry);
+DEFINE_TRACE(syscall_exit);
+
+extern unsigned long sys_call_table[];
+
+void ltt_dump_sys_call_table(void *call_data)
+{
+	int i;
+	char namebuf[KSYM_NAME_LEN];
+
+	for (i = 0; i < __NR_syscall_max + 1; i++) {
+		sprint_symbol(namebuf, sys_call_table[i]);
+		__trace_mark(0, syscall_state, sys_call_table, call_data,
+			"id %d address %p symbol %s",
+			i, (void*)sys_call_table[i], namebuf);
+	}
+}
+EXPORT_SYMBOL_GPL(ltt_dump_sys_call_table);
+
+void ltt_dump_idt_table(void *call_data)
+{
+}
+EXPORT_SYMBOL_GPL(ltt_dump_idt_table);
 
 /*
  * this routine will get a word off of the processes privileged stack.
@@ -549,58 +579,6 @@ static int ptrace_write_user(struct task_struct *tsk, unsigned long off,
 	return put_user_reg(tsk, off >> 2, val);
 }
 
-/*
- * Get all user integer registers.
- */
-static int ptrace_getregs(struct task_struct *tsk, void __user *uregs)
-{
-	struct pt_regs *regs = task_pt_regs(tsk);
-
-	return copy_to_user(uregs, regs, sizeof(struct pt_regs)) ? -EFAULT : 0;
-}
-
-/*
- * Set all user integer registers.
- */
-static int ptrace_setregs(struct task_struct *tsk, void __user *uregs)
-{
-	struct pt_regs newregs;
-	int ret;
-
-	ret = -EFAULT;
-	if (copy_from_user(&newregs, uregs, sizeof(struct pt_regs)) == 0) {
-		struct pt_regs *regs = task_pt_regs(tsk);
-
-		ret = -EINVAL;
-		if (valid_user_regs(&newregs)) {
-			*regs = newregs;
-			ret = 0;
-		}
-	}
-
-	return ret;
-}
-
-/*
- * Get the child FPU state.
- */
-static int ptrace_getfpregs(struct task_struct *tsk, void __user *ufp)
-{
-	return copy_to_user(ufp, &task_thread_info(tsk)->fpstate,
-			    sizeof(struct user_fp)) ? -EFAULT : 0;
-}
-
-/*
- * Set the child FPU state.
- */
-static int ptrace_setfpregs(struct task_struct *tsk, void __user *ufp)
-{
-	struct thread_info *thread = task_thread_info(tsk);
-	thread->used_cp[1] = thread->used_cp[2] = 1;
-	return copy_from_user(&thread->fpstate, ufp,
-			      sizeof(struct user_fp)) ? -EFAULT : 0;
-}
-
 #ifdef CONFIG_IWMMXT
 
 /*
@@ -659,77 +637,227 @@ static int ptrace_setcrunchregs(struct task_struct *tsk, void __user *ufp)
 }
 #endif
 
+/* regset get/set implementations */
+
+static int gpr_get(struct task_struct *target,
+		   const struct user_regset *regset,
+		   unsigned int pos, unsigned int count,
+		   void *kbuf, void __user *ubuf)
+{
+	struct pt_regs *regs = task_pt_regs(target);
+
+	return user_regset_copyout(&pos, &count, &kbuf, &ubuf,
+				   regs,
+				   0, sizeof(*regs));
+}
+
+static int gpr_set(struct task_struct *target,
+		   const struct user_regset *regset,
+		   unsigned int pos, unsigned int count,
+		   const void *kbuf, const void __user *ubuf)
+{
+	int ret;
+	struct pt_regs newregs;
+
+	ret = user_regset_copyin(&pos, &count, &kbuf, &ubuf,
+				 &newregs,
+				 0, sizeof(newregs));
+	if (ret)
+		return ret;
+
+	if (!valid_user_regs(&newregs))
+		return -EINVAL;
+
+	*task_pt_regs(target) = newregs;
+	return 0;
+}
+
+static int fpa_get(struct task_struct *target,
+		   const struct user_regset *regset,
+		   unsigned int pos, unsigned int count,
+		   void *kbuf, void __user *ubuf)
+{
+	return user_regset_copyout(&pos, &count, &kbuf, &ubuf,
+				   &task_thread_info(target)->fpstate,
+				   0, sizeof(struct user_fp));
+}
+
+static int fpa_set(struct task_struct *target,
+		   const struct user_regset *regset,
+		   unsigned int pos, unsigned int count,
+		   const void *kbuf, const void __user *ubuf)
+{
+	struct thread_info *thread = task_thread_info(target);
+
+	thread->used_cp[1] = thread->used_cp[2] = 1;
+
+	return user_regset_copyin(&pos, &count, &kbuf, &ubuf,
+		&thread->fpstate,
+		0, sizeof(struct user_fp));
+}
+
 #ifdef CONFIG_VFP
 /*
- * Get the child VFP state.
+ * VFP register get/set implementations.
+ *
+ * With respect to the kernel, struct user_fp is divided into three chunks:
+ * 16 or 32 real VFP registers (d0-d15 or d0-31)
+ *	These are transferred to/from the real registers in the task's
+ *	vfp_hard_struct.  The number of registers depends on the kernel
+ *	configuration.
+ *
+ * 16 or 0 fake VFP registers (d16-d31 or empty)
+ *	i.e., the user_vfp structure has space for 32 registers even if
+ *	the kernel doesn't have them all.
+ *
+ *	vfp_get() reads this chunk as zero where applicable
+ *	vfp_set() ignores this chunk
+ *
+ * 1 word for the FPSCR
+ *
+ * The bounds-checking logic built into user_regset_copyout and friends
+ * means that we can make a simple sequence of calls to map the relevant data
+ * to/from the specified slice of the user regset structure.
  */
-static int ptrace_getvfpregs(struct task_struct *tsk, void __user *data)
+static int vfp_get(struct task_struct *target,
+		   const struct user_regset *regset,
+		   unsigned int pos, unsigned int count,
+		   void *kbuf, void __user *ubuf)
 {
-	struct thread_info *thread = task_thread_info(tsk);
-	union vfp_state *vfp = &thread->vfpstate;
-	struct user_vfp __user *ufp = data;
+	int ret;
+	struct thread_info *thread = task_thread_info(target);
+	struct vfp_hard_struct const *vfp = &thread->vfpstate.hard;
+	const size_t user_fpregs_offset = offsetof(struct user_vfp, fpregs);
+	const size_t user_fpscr_offset = offsetof(struct user_vfp, fpscr);
 
-	vfp_sync_state(thread);
+	vfp_sync_hwstate(thread);
 
-	/* copy the floating point registers */
-	if (copy_to_user(&ufp->fpregs, &vfp->hard.fpregs,
-			 sizeof(vfp->hard.fpregs)))
-		return -EFAULT;
+	ret = user_regset_copyout(&pos, &count, &kbuf, &ubuf,
+				  &vfp->fpregs,
+				  user_fpregs_offset,
+				  user_fpregs_offset + sizeof(vfp->fpregs));
+	if (ret)
+		return ret;
 
-	/* copy the status and control register */
-	if (put_user(vfp->hard.fpscr, &ufp->fpscr))
-		return -EFAULT;
+	ret = user_regset_copyout_zero(&pos, &count, &kbuf, &ubuf,
+				       user_fpregs_offset + sizeof(vfp->fpregs),
+				       user_fpscr_offset);
+	if (ret)
+		return ret;
 
-	return 0;
+	return user_regset_copyout(&pos, &count, &kbuf, &ubuf,
+				   &vfp->fpscr,
+				   user_fpscr_offset,
+				   user_fpscr_offset + sizeof(vfp->fpscr));
 }
 
 /*
- * Set the child VFP state.
+ * For vfp_set() a read-modify-write is done on the VFP registers,
+ * in order to avoid writing back a half-modified set of registers on
+ * failure.
  */
-static int ptrace_setvfpregs(struct task_struct *tsk, void __user *data)
+static int vfp_set(struct task_struct *target,
+			  const struct user_regset *regset,
+			  unsigned int pos, unsigned int count,
+			  const void *kbuf, const void __user *ubuf)
 {
-	struct thread_info *thread = task_thread_info(tsk);
-	union vfp_state *vfp = &thread->vfpstate;
-	struct user_vfp __user *ufp = data;
+	int ret;
+	struct thread_info *thread = task_thread_info(target);
+	struct vfp_hard_struct new_vfp = thread->vfpstate.hard;
+	const size_t user_fpregs_offset = offsetof(struct user_vfp, fpregs);
+	const size_t user_fpscr_offset = offsetof(struct user_vfp, fpscr);
 
-	vfp_sync_state(thread);
+	ret = user_regset_copyin(&pos, &count, &kbuf, &ubuf,
+				  &new_vfp.fpregs,
+				  user_fpregs_offset,
+				  user_fpregs_offset + sizeof(new_vfp.fpregs));
+	if (ret)
+		return ret;
 
-	/* copy the floating point registers */
-	if (copy_from_user(&vfp->hard.fpregs, &ufp->fpregs,
-			   sizeof(vfp->hard.fpregs)))
-		return -EFAULT;
+	ret = user_regset_copyin_ignore(&pos, &count, &kbuf, &ubuf,
+				user_fpregs_offset + sizeof(new_vfp.fpregs),
+				user_fpscr_offset);
+	if (ret)
+		return ret;
 
-	/* copy the status and control register */
-	if (get_user(vfp->hard.fpscr, &ufp->fpscr))
-		return -EFAULT;
+	ret = user_regset_copyin(&pos, &count, &kbuf, &ubuf,
+				 &new_vfp.fpscr,
+				 user_fpscr_offset,
+				 user_fpscr_offset + sizeof(new_vfp.fpscr));
+	if (ret)
+		return ret;
+
+	vfp_sync_hwstate(thread);
+	thread->vfpstate.hard = new_vfp;
+	vfp_flush_hwstate(thread);
 
 	return 0;
 }
+#endif /* CONFIG_VFP */
+
+enum arm_regset {
+	REGSET_GPR,
+	REGSET_FPR,
+#ifdef CONFIG_VFP
+	REGSET_VFP,
 #endif
+};
+
+static const struct user_regset arm_regsets[] = {
+	[REGSET_GPR] = {
+		.core_note_type = NT_PRSTATUS,
+		.n = ELF_NGREG,
+		.size = sizeof(u32),
+		.align = sizeof(u32),
+		.get = gpr_get,
+		.set = gpr_set
+	},
+	[REGSET_FPR] = {
+		/*
+		 * For the FPA regs in fpstate, the real fields are a mixture
+		 * of sizes, so pretend that the registers are word-sized:
+		 */
+		.core_note_type = NT_PRFPREG,
+		.n = sizeof(struct user_fp) / sizeof(u32),
+		.size = sizeof(u32),
+		.align = sizeof(u32),
+		.get = fpa_get,
+		.set = fpa_set
+	},
+#ifdef CONFIG_VFP
+	[REGSET_VFP] = {
+		/*
+		 * Pretend that the VFP regs are word-sized, since the FPSCR is
+		 * a single word dangling at the end of struct user_vfp:
+		 */
+		.core_note_type = NT_ARM_VFP,
+		.n = ARM_VFPREGS_SIZE / sizeof(u32),
+		.size = sizeof(u32),
+		.align = sizeof(u32),
+		.get = vfp_get,
+		.set = vfp_set
+	},
+#endif /* CONFIG_VFP */
+};
+
+static const struct user_regset_view user_arm_view = {
+	.name = "arm", .e_machine = ELF_ARCH, .ei_osabi = ELF_OSABI,
+	.regsets = arm_regsets, .n = ARRAY_SIZE(arm_regsets)
+};
+
+const struct user_regset_view *task_user_regset_view(struct task_struct *task)
+{
+	return &user_arm_view;
+}
 
 long arch_ptrace(struct task_struct *child, long request, long addr, long data)
 {
 	int ret;
+	unsigned long __user *datap = (unsigned long __user *) data;
 
 	switch (request) {
-		/*
-		 * read word at location "addr" in the child process.
-		 */
-		case PTRACE_PEEKTEXT:
-		case PTRACE_PEEKDATA:
-			ret = generic_ptrace_peekdata(child, addr, data);
-			break;
-
 		case PTRACE_PEEKUSR:
-			ret = ptrace_read_user(child, addr, (unsigned long __user *)data);
-			break;
-
-		/*
-		 * write the word at location addr.
-		 */
-		case PTRACE_POKETEXT:
-		case PTRACE_POKEDATA:
-			ret = generic_ptrace_pokedata(child, addr, data);
+			ret = ptrace_read_user(child, addr, datap);
 			break;
 
 		case PTRACE_POKEUSR:
@@ -784,34 +912,46 @@ long arch_ptrace(struct task_struct *child, long request, long addr, long data)
 			break;
 
 		case PTRACE_GETREGS:
-			ret = ptrace_getregs(child, (void __user *)data);
+			ret = copy_regset_to_user(child,
+						  &user_arm_view, REGSET_GPR,
+						  0, sizeof(struct pt_regs),
+						  datap);
 			break;
 
 		case PTRACE_SETREGS:
-			ret = ptrace_setregs(child, (void __user *)data);
+			ret = copy_regset_from_user(child,
+						    &user_arm_view, REGSET_GPR,
+						    0, sizeof(struct pt_regs),
+						    datap);
 			break;
 
 		case PTRACE_GETFPREGS:
-			ret = ptrace_getfpregs(child, (void __user *)data);
+			ret = copy_regset_to_user(child,
+						  &user_arm_view, REGSET_FPR,
+						  0, sizeof(union fp_state),
+						  datap);
 			break;
-		
+
 		case PTRACE_SETFPREGS:
-			ret = ptrace_setfpregs(child, (void __user *)data);
+			ret = copy_regset_from_user(child,
+						    &user_arm_view, REGSET_FPR,
+						    0, sizeof(union fp_state),
+						    datap);
 			break;
 
 #ifdef CONFIG_IWMMXT
 		case PTRACE_GETWMMXREGS:
-			ret = ptrace_getwmmxregs(child, (void __user *)data);
+			ret = ptrace_getwmmxregs(child, datap);
 			break;
 
 		case PTRACE_SETWMMXREGS:
-			ret = ptrace_setwmmxregs(child, (void __user *)data);
+			ret = ptrace_setwmmxregs(child, datap);
 			break;
 #endif
 
 		case PTRACE_GET_THREAD_AREA:
 			ret = put_user(task_thread_info(child)->tp_value,
-				       (unsigned long __user *) data);
+				       datap);
 			break;
 
 		case PTRACE_SET_SYSCALL:
@@ -821,21 +961,27 @@ long arch_ptrace(struct task_struct *child, long request, long addr, long data)
 
 #ifdef CONFIG_CRUNCH
 		case PTRACE_GETCRUNCHREGS:
-			ret = ptrace_getcrunchregs(child, (void __user *)data);
+			ret = ptrace_getcrunchregs(child, datap);
 			break;
 
 		case PTRACE_SETCRUNCHREGS:
-			ret = ptrace_setcrunchregs(child, (void __user *)data);
+			ret = ptrace_setcrunchregs(child, datap);
 			break;
 #endif
 
 #ifdef CONFIG_VFP
 		case PTRACE_GETVFPREGS:
-			ret = ptrace_getvfpregs(child, (void __user *)data);
+			ret = copy_regset_to_user(child,
+						  &user_arm_view, REGSET_VFP,
+						  0, ARM_VFPREGS_SIZE,
+						  datap);
 			break;
 
 		case PTRACE_SETVFPREGS:
-			ret = ptrace_setvfpregs(child, (void __user *)data);
+			ret = copy_regset_from_user(child,
+						    &user_arm_view, REGSET_VFP,
+						    0, ARM_VFPREGS_SIZE,
+						    datap);
 			break;
 #endif
 
@@ -850,6 +996,11 @@ long arch_ptrace(struct task_struct *child, long request, long addr, long data)
 asmlinkage int syscall_trace(int why, struct pt_regs *regs, int scno)
 {
 	unsigned long ip;
+
+	if (!why)
+		trace_syscall_entry(regs, scno);
+	else
+		trace_syscall_exit(regs->ARM_r0);
 
 	if (!test_thread_flag(TIF_SYSCALL_TRACE))
 		return scno;

@@ -98,5 +98,7 @@ extern struct dso *kernel_dso;
 extern struct dso *vdso;
 extern struct dso *hypervisor_dso;
 extern const char *vmlinux_name;
+extern const char *kallsyms_name;
+extern const char *symfs_name;
 extern int   modules;
 #endif /* _PERF_SYMBOL_ */

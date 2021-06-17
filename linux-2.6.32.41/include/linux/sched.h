@@ -1214,6 +1214,41 @@ struct sched_rt_entity {
 
 struct rcu_node;
 
+#ifdef CONFIG_NETCPURATE
+struct netcpurate_dat {
+	cycles_t stime;	/* start */
+	cycles_t utime;	/* used */
+	cycles_t ntime;	/* nest used */
+	int nnum;	/* nest number */
+
+	cycles_t astime;    /* activate_task() start */
+	int asflag;         /* activate_task() set flag */
+	cycles_t ltime_max; /* latency max */
+	cycles_t ltime_min; /* latency min */
+	cycles_t ltime_sum; /* latency sum */
+	int lnum;           /* latency number */
+
+	struct task_struct *cur_task;
+};
+extern void netcpurate_irq_period_end(unsigned int irq);
+extern void netcpurate_irq_period_start(unsigned int irq);
+extern void netcpurate_task_init(struct task_struct *task);
+extern void netcpurate_task_period(struct task_struct *prev,
+				   struct task_struct *next);
+extern void netcpurate_activate_period_start(struct task_struct *p);
+extern void netcpurate_zombie_period(struct task_struct *p);
+#ifdef CONFIG_ARM
+extern unsigned long get_netcpurate_cycles(void); /* platform specific */
+#endif
+#else
+static inline void netcpurate_irq_period_end(unsigned int irq) {}
+static inline void netcpurate_irq_period_start(unsigned int irq) {}
+static inline void netcpurate_task_init(struct task_struct *task) {}
+static inline void netcpurate_task_period(struct task_struct *prev,
+					  struct task_struct *next) {}
+static inline void netcpurate_activate_period_start(struct task_struct *p) {}
+static inline void netcpurate_zombie_period(struct task_struct *p) {}
+#endif
 struct task_struct {
 	volatile long state;	/* -1 unrunnable, 0 runnable, >0 stopped */
 	void *stack;
@@ -1421,6 +1456,9 @@ struct task_struct {
 	/* mutex deadlock detection */
 	struct mutex_waiter *blocked_on;
 #endif
+#ifdef CONFIG_DEBUG_PSRWLOCK
+	struct psrwlock_waiter *psrwlock_blocked_on;
+#endif
 #ifdef CONFIG_TRACE_IRQFLAGS
 	unsigned int irq_events;
 	int hardirqs_enabled;
@@ -1540,6 +1578,9 @@ struct task_struct {
 	/* bitmask of trace recursion */
 	unsigned long trace_recursion;
 #endif /* CONFIG_TRACING */
+#ifdef CONFIG_NETCPURATE
+	struct netcpurate_dat cpu;
+#endif
 };
 
 /* Future-safe accessor for struct task_struct's cpus_allowed. */
@@ -2615,6 +2656,9 @@ static inline unsigned long rlimit_max(unsigned int limit)
 {
 	return task_rlimit_max(current, limit);
 }
+
+extern void clear_kernel_trace_flag_all_tasks(void);
+extern void set_kernel_trace_flag_all_tasks(void);
 
 #endif /* __KERNEL__ */
 

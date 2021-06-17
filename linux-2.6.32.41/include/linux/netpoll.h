@@ -21,6 +21,8 @@ struct netpoll {
 	__be32 local_ip, remote_ip;
 	u16 local_port, remote_port;
 	u8 remote_mac[ETH_ALEN];
+	int use_dynamic_ip;
+	int use_dynamic_mac;
 };
 
 struct netpoll_info {

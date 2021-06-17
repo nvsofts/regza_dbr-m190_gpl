@@ -18,11 +18,14 @@
 #include <linux/file.h>
 #include <linux/utsname.h>
 #include <linux/ipc.h>
+#include <trace/ipc.h>
 
 #include <linux/uaccess.h>
 #include <linux/unistd.h>
 
 #include <asm/syscalls.h>
+
+DEFINE_TRACE(ipc_call);
 
 /*
  * Perform the select(nd, in, out, ex, tv) and mmap() system
@@ -87,6 +90,8 @@ asmlinkage int sys_ipc(uint call, int first, int second,
 
 	version = call >> 16; /* hack for backward compatibility */
 	call &= 0xffff;
+
+	trace_ipc_call(call, first);
 
 	switch (call) {
 	case SEMOP:

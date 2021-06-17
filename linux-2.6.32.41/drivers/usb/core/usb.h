@@ -178,3 +178,19 @@ extern void usb_notify_remove_device(struct usb_device *udev);
 extern void usb_notify_add_bus(struct usb_bus *ubus);
 extern void usb_notify_remove_bus(struct usb_bus *ubus);
 
+#ifdef CONFIG_USB_HUB_PORT_MANAGEMENT
+extern void hub_overcurrent_recover(void);
+extern int usb_create_sysfs_overcurrent_files(struct device *dev);
+extern void usb_remove_sysfs_overcurrent_files(struct device *dev);
+extern void set_hub_port_power_status(struct usb_device *udev,
+				      unsigned long ppc_on,
+				      unsigned long ppc_off);
+extern ssize_t get_hub_port_status(struct usb_device *udev, char *buf);
+extern int usb_create_sysfs_port_status_files(struct device *dev);
+extern void usb_remove_sysfs_port_status_files(struct device *dev);
+#ifdef CONFIG_USB_HUB_PORT_TEST
+extern void set_hub_port_test_status(struct usb_device *udev,
+				     unsigned int test_mode);
+extern void usb_remove_sysfs_port_test_files(struct device *dev);
+#endif /* CONFIG_USB_HUB_PORT_TEST */
+#endif

@@ -146,6 +146,16 @@ static int ip6_mc_add_src(struct inet6_dev *idev, struct in6_addr *pmca,
 			  int delta);
 static int ip6_mc_leave_src(struct sock *sk, struct ipv6_mc_socklist *iml,
 			    struct inet6_dev *idev);
+#ifdef CONFIG_TOSHIBA_IPTV_MLDV2_FOR_STB
+static void mld_del_delrec_ssm(struct inet6_dev *idev, struct in6_addr *addr,
+			       struct in6_addr *addr2);
+static int ip6_mc_del_src_ssm(struct inet6_dev *idev, struct in6_addr *pmca,
+			  int sfmode, int sfcount, struct in6_addr *psfsrc,
+			  int delta);
+static int ip6_mc_add_src_ssm(struct inet6_dev *idev, struct in6_addr *pmca,
+			  int sfmode, int sfcount, struct in6_addr *psfsrc,
+			  int delta);
+#endif
 
 
 #define IGMP6_UNSOLICITED_IVAL	(10*HZ)
@@ -243,6 +253,81 @@ int ipv6_sock_mc_join(struct sock *sk, int ifindex, const struct in6_addr *addr)
 
 	return 0;
 }
+#ifdef CONFIG_TOSHIBA_IPTV_MLDV2_FOR_STB
+int ipv6_sock_mc_join_ssm(struct sock *sk, int ifindex,
+			 const struct in6_addr *addr,
+			 struct in6_addr *addr2)
+{
+	struct net_device *dev = NULL;
+	struct ipv6_mc_socklist *mc_lst;
+	struct ipv6_pinfo *np = inet6_sk(sk);
+	struct net *net = sock_net(sk);
+	int err;
+
+	if (!ipv6_addr_is_multicast(addr))
+		return -EINVAL;
+
+	read_lock_bh(&ipv6_sk_mc_lock);
+	for (mc_lst = np->ipv6_mc_list; mc_lst; mc_lst = mc_lst->next) {
+		if ((ifindex == 0 || mc_lst->ifindex == ifindex) &&
+		    ipv6_addr_equal(&mc_lst->addr, addr)) {
+			read_unlock_bh(&ipv6_sk_mc_lock);
+			return -EADDRINUSE;
+		}
+	}
+	read_unlock_bh(&ipv6_sk_mc_lock);
+
+	mc_lst = sock_kmalloc(sk, sizeof(struct ipv6_mc_socklist), GFP_KERNEL);
+
+	if (mc_lst == NULL)
+		return -ENOMEM;
+
+	mc_lst->next = NULL;
+	ipv6_addr_copy(&mc_lst->addr, addr);
+
+	if (ifindex == 0) {
+		struct rt6_info *rt;
+		rt = rt6_lookup(net, addr, NULL, 0, 0);
+		if (rt) {
+			dev = rt->rt6i_dev;
+			dev_hold(dev);
+			dst_release(&rt->u.dst);
+		}
+	} else
+		dev = dev_get_by_index(net, ifindex);
+
+	if (dev == NULL) {
+		sock_kfree_s(sk, mc_lst, sizeof(*mc_lst));
+		return -ENODEV;
+	}
+
+	mc_lst->ifindex = dev->ifindex;
+	mc_lst->sfmode = MCAST_INCLUDE;     /* add */
+	rwlock_init(&mc_lst->sflock);
+	mc_lst->sflist = NULL;
+
+	/*
+	 *	now add/increase the group membership on the device
+	 */
+
+	err = ipv6_dev_mc_inc_ssm(dev, addr, addr2);    /* add */
+
+	if (err) {
+		sock_kfree_s(sk, mc_lst, sizeof(*mc_lst));
+		dev_put(dev);
+		return err;
+	}
+
+	write_lock_bh(&ipv6_sk_mc_lock);
+	mc_lst->next = np->ipv6_mc_list;
+	np->ipv6_mc_list = mc_lst;
+	write_unlock_bh(&ipv6_sk_mc_lock);
+
+	dev_put(dev);
+
+	return 0;
+}
+#endif
 
 /*
  *	socket leave on multicast group
@@ -402,8 +487,13 @@ int ip6_mc_source(int add, int omode, struct sock *sk,
 		}
 	} else if (pmc->sfmode != omode) {
 		/* allow mode switches for empty-set filters */
+#ifndef CONFIG_TOSHIBA_IPTV_MLDV2_FOR_STB
 		ip6_mc_add_src(idev, group, omode, 0, NULL, 0);
 		ip6_mc_del_src(idev, group, pmc->sfmode, 0, NULL, 0);
+#else
+		ip6_mc_add_src_ssm(idev, group, omode, 0, NULL, 0);
+		ip6_mc_del_src_ssm(idev, group, pmc->sfmode, 0, NULL, 0);
+#endif
 		pmc->sfmode = omode;
 	}
 
@@ -479,7 +569,11 @@ int ip6_mc_source(int add, int omode, struct sock *sk,
 	psl->sl_count++;
 	err = 0;
 	/* update the interface list */
+#ifndef CONFIG_TOSHIBA_IPTV_MLDV2_FOR_STB
 	ip6_mc_add_src(idev, group, omode, 1, source, 1);
+#else
+	ip6_mc_add_src_ssm(idev, group, omode, 1, source, 1);
+#endif
 done:
 	if (pmclocked)
 		write_unlock_bh(&pmc->sflock);
@@ -731,6 +825,34 @@ static void igmp6_group_added(struct ifmcaddr6 *mc)
 	mld_ifc_event(mc->idev);
 }
 
+#ifdef CONFIG_TOSHIBA_IPTV_MLDV2_FOR_STB
+static void igmp6_group_added_ssm(struct ifmcaddr6 *mc)
+{
+	struct net_device *dev = mc->idev->dev;
+	char buf[MAX_ADDR_LEN];
+
+	spin_lock_bh(&mc->mca_lock);
+	if (!(mc->mca_flags&MAF_LOADED)) {
+		mc->mca_flags |= MAF_LOADED;
+		if (ndisc_mc_map(&mc->mca_addr, buf, dev, 0) == 0)
+			dev_mc_add(dev, buf, dev->addr_len, 0);
+	}
+	spin_unlock_bh(&mc->mca_lock);
+
+	if (!(dev->flags & IFF_UP) || (mc->mca_flags & MAF_NOREPORT))
+		return;
+
+	if (MLD_V1_SEEN(mc->idev)) {
+		igmp6_join_group(mc);
+		return;
+	}
+	/* else v2 */
+
+	mc->mca_crcount = 0;
+	mld_ifc_event(mc->idev);
+}
+#endif
+
 static void igmp6_group_dropped(struct ifmcaddr6 *mc)
 {
 	struct net_device *dev = mc->idev->dev;
@@ -827,6 +949,52 @@ static void mld_del_delrec(struct inet6_dev *idev, struct in6_addr *pmca)
 		kfree(pmc);
 	}
 }
+
+#ifdef CONFIG_TOSHIBA_IPTV_MLDV2_FOR_STB
+static void mld_del_delrec_ssm(struct inet6_dev *idev, struct in6_addr *pmca,
+			       struct in6_addr *addr2)
+{
+	struct ifmcaddr6   *pmc, *pmc_prev;
+	struct ip6_sf_list *psf, *psf_prev;
+
+	write_lock_bh(&idev->mc_lock);
+	psf = NULL;
+	pmc_prev = NULL;
+	for (pmc = idev->mc_tomb; pmc; pmc = pmc->next) {
+		if (ipv6_addr_equal(&pmc->mca_addr, pmca))
+			break;
+		pmc_prev = pmc;
+	}
+	if (pmc) {
+		psf_prev = NULL;
+		for (psf = pmc->mca_tomb; psf; psf = psf->sf_next) {
+			if (ipv6_addr_equal(&psf->sf_addr, addr2))
+				break;
+			psf_prev = psf;
+		}
+		if (psf) {
+			if (psf_prev)
+				psf_prev->sf_next = psf->sf_next;
+			else
+				pmc->mca_tomb = psf->sf_next;
+		}
+		if (pmc->mca_tomb)
+			pmc = NULL;
+		else {
+			if (pmc_prev)
+				pmc_prev->next = pmc->next;
+			else
+				idev->mc_tomb = pmc->next;
+		}
+	}
+	write_unlock_bh(&idev->mc_lock);
+	if (psf || pmc) {
+		kfree(psf);
+		in6_dev_put(idev);
+		kfree(pmc);
+	}
+}
+#endif
 
 static void mld_clear_delrec(struct inet6_dev *idev)
 {
@@ -932,6 +1100,77 @@ int ipv6_dev_mc_inc(struct net_device *dev, const struct in6_addr *addr)
 	ma_put(mc);
 	return 0;
 }
+#ifdef CONFIG_TOSHIBA_IPTV_MLDV2_FOR_STB
+int ipv6_dev_mc_inc_ssm(struct net_device *dev, const struct in6_addr *addr,
+			struct in6_addr *addr2)
+{
+	struct ifmcaddr6 *mc;
+	struct inet6_dev *idev;
+
+	idev = in6_dev_get(dev);
+
+	if (idev == NULL)
+		return -EINVAL;
+
+	write_lock_bh(&idev->lock);
+	if (idev->dead) {
+		write_unlock_bh(&idev->lock);
+		in6_dev_put(idev);
+		return -ENODEV;
+	}
+
+	for (mc = idev->mc_list; mc; mc = mc->next) {
+		if (ipv6_addr_equal(&mc->mca_addr, addr)) {
+			mc->mca_users++;
+			write_unlock_bh(&idev->lock);
+			ip6_mc_add_src_ssm(idev, &mc->mca_addr, MCAST_INCLUDE,
+				 0, NULL, 0);
+			in6_dev_put(idev);
+			return 0;
+		}
+	}
+
+	/*
+	 *	not found: create a new one.
+	 */
+
+	mc = kzalloc(sizeof(struct ifmcaddr6), GFP_ATOMIC);
+
+	if (mc == NULL) {
+		write_unlock_bh(&idev->lock);
+		in6_dev_put(idev);
+		return -ENOMEM;
+	}
+
+	setup_timer(&mc->mca_timer, igmp6_timer_handler, (unsigned long)mc);
+
+	ipv6_addr_copy(&mc->mca_addr, addr);
+	mc->idev = idev;
+	mc->mca_users = 1;
+	/* mca_stamp should be updated upon changes */
+	mc->mca_cstamp = mc->mca_tstamp = jiffies;
+	atomic_set(&mc->mca_refcnt, 2);
+	spin_lock_init(&mc->mca_lock);
+
+	/* initial mode is (EX, empty) */
+	mc->mca_sfmode = MCAST_INCLUDE;
+	mc->mca_sfcount[MCAST_EXCLUDE] = 0;
+	mc->mca_sfcount[MCAST_INCLUDE] = 1;
+
+	if (ipv6_addr_is_ll_all_nodes(&mc->mca_addr) ||
+	    IPV6_ADDR_MC_SCOPE(&mc->mca_addr) < IPV6_ADDR_SCOPE_LINKLOCAL)
+		mc->mca_flags |= MAF_NOREPORT;
+
+	mc->next = idev->mc_list;
+	idev->mc_list = mc;
+	mld_del_delrec_ssm(idev, &mc->mca_addr, addr2);
+	igmp6_group_added_ssm(mc);
+
+	write_unlock_bh(&idev->lock);
+	ma_put(mc);
+	return 0;
+}
+#endif
 
 /*
  *	device multicast group del
@@ -1959,6 +2198,65 @@ static int ip6_mc_del_src(struct inet6_dev *idev, struct in6_addr *pmca,
 	return err;
 }
 
+#ifdef CONFIG_TOSHIBA_IPTV_MLDV2_FOR_STB
+static int ip6_mc_del_src_ssm(struct inet6_dev *idev, struct in6_addr *pmca,
+			  int sfmode, int sfcount, struct in6_addr *psfsrc,
+			  int delta)
+{
+	struct ifmcaddr6 *pmc;
+	int	changerec = 0;
+	int	i, err;
+
+	if (!idev)
+		return -ENODEV;
+	read_lock_bh(&idev->lock);
+	for (pmc = idev->mc_list; pmc; pmc = pmc->next) {
+		if (ipv6_addr_equal(pmca, &pmc->mca_addr))
+			break;
+	}
+	if (!pmc) {
+		/* MCA not found?? bug */
+		read_unlock_bh(&idev->lock);
+		return -ESRCH;
+	}
+	spin_lock_bh(&pmc->mca_lock);
+	sf_markstate(pmc);
+	if (!delta) {
+		if (!pmc->mca_sfcount[sfmode]) {
+			spin_unlock_bh(&pmc->mca_lock);
+			read_unlock_bh(&idev->lock);
+			return -EINVAL;
+		}
+		pmc->mca_sfcount[sfmode]--;
+	}
+	err = 0;
+	for (i = 0; i < sfcount; i++) {
+		int rv = ip6_mc_del1_src(pmc, sfmode, &psfsrc[i]);
+
+		changerec |= rv > 0;
+		if (!err && rv < 0)
+			err = rv;
+	}
+	if (pmc->mca_sfmode == MCAST_EXCLUDE &&
+	    pmc->mca_sfcount[MCAST_EXCLUDE] == 0 &&
+	    pmc->mca_sfcount[MCAST_INCLUDE]) {
+		struct ip6_sf_list *psf;
+
+		/* filter mode change */
+		pmc->mca_sfmode = MCAST_INCLUDE;
+		pmc->mca_crcount = 0;
+		idev->mc_ifc_count = pmc->mca_crcount;
+		for (psf = pmc->mca_sources; psf; psf = psf->sf_next)
+			psf->sf_crcount = 0;
+		mld_ifc_event(pmc->idev);
+	} else if (sf_setstate(pmc) || changerec)
+		mld_ifc_event(pmc->idev);
+	spin_unlock_bh(&pmc->mca_lock);
+	read_unlock_bh(&idev->lock);
+	return err;
+}
+#endif
+
 /*
  * Add multicast single-source filter to the interface list
  */
@@ -2127,6 +2425,71 @@ static int ip6_mc_add_src(struct inet6_dev *idev, struct in6_addr *pmca,
 	read_unlock_bh(&idev->lock);
 	return err;
 }
+
+#ifdef CONFIG_TOSHIBA_IPTV_MLDV2_FOR_STB
+static int ip6_mc_add_src_ssm(struct inet6_dev *idev, struct in6_addr *pmca,
+			  int sfmode, int sfcount, struct in6_addr *psfsrc,
+			  int delta)
+{
+	struct ifmcaddr6 *pmc;
+	int	isexclude;
+	int	i, err;
+
+	if (!idev)
+		return -ENODEV;
+	read_lock_bh(&idev->lock);
+	for (pmc = idev->mc_list; pmc; pmc = pmc->next) {
+		if (ipv6_addr_equal(pmca, &pmc->mca_addr))
+			break;
+	}
+	if (!pmc) {
+		/* MCA not found?? bug */
+		read_unlock_bh(&idev->lock);
+		return -ESRCH;
+	}
+	spin_lock_bh(&pmc->mca_lock);
+
+	sf_markstate(pmc);
+	isexclude = pmc->mca_sfmode == MCAST_EXCLUDE;
+	if (!delta)
+		pmc->mca_sfcount[sfmode]++;
+	err = 0;
+	for (i = 0; i < sfcount; i++) {
+		err = ip6_mc_add1_src(pmc, sfmode, &psfsrc[i], delta);
+		if (err)
+			break;
+	}
+	if (err) {
+		int j;
+
+		if (!delta)
+			pmc->mca_sfcount[sfmode]--;
+		for (j = 0; j < i; j++)
+			(void) ip6_mc_del1_src(pmc, sfmode, &psfsrc[i]);
+	} else if (isexclude != (pmc->mca_sfcount[MCAST_EXCLUDE] != 0)) {
+		struct inet6_dev *idev = pmc->idev;
+		struct ip6_sf_list *psf;
+
+		/* filter mode change */
+		if (pmc->mca_sfcount[MCAST_EXCLUDE])
+			pmc->mca_sfmode = MCAST_EXCLUDE;
+		else if (pmc->mca_sfcount[MCAST_INCLUDE])
+			pmc->mca_sfmode = MCAST_INCLUDE;
+		/* else no filters; keep old mode for reports */
+
+		pmc->mca_crcount = 0;
+
+		idev->mc_ifc_count = pmc->mca_crcount;
+		for (psf = pmc->mca_sources; psf; psf = psf->sf_next)
+			psf->sf_crcount = 0;
+		mld_ifc_event(idev);
+	} else if (sf_setstate(pmc))
+		mld_ifc_event(idev);
+	spin_unlock_bh(&pmc->mca_lock);
+	read_unlock_bh(&idev->lock);
+	return err;
+}
+#endif
 
 static void ip6_mc_clear_src(struct ifmcaddr6 *pmc)
 {

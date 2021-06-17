@@ -19,8 +19,6 @@ static inline int cpu_to_node(int cpu)
 
 #define cpumask_of_node(node) (&numa_cpumask_lookup_table[node])
 
-int of_node_to_nid(struct device_node *device);
-
 struct pci_bus;
 #ifdef CONFIG_PCI
 extern int pcibus_to_node(struct pci_bus *bus);
@@ -65,11 +63,6 @@ extern int sysfs_add_device_to_node(struct sys_device *dev, int nid);
 extern void sysfs_remove_device_from_node(struct sys_device *dev, int nid);
 
 #else
-
-static inline int of_node_to_nid(struct device_node *device)
-{
-	return 0;
-}
 
 static inline void dump_numa_cpu_topology(void) {}
 

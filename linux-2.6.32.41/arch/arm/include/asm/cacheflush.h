@@ -15,6 +15,7 @@
 #include <asm/glue.h>
 #include <asm/shmparam.h>
 #include <asm/cachetype.h>
+#include <asm/outercache.h>
 
 #define CACHE_COLOUR(vaddr)	((vaddr & (SHMLBA - 1)) >> PAGE_SHIFT)
 
@@ -202,6 +203,14 @@
  *		Clean and invalidate the specified virtual address range.
  *		- start  - virtual start address
  *		- end    - virtual end address
+ *
+ *	clean_dcache_all()
+ *
+ *		Unconditionally clean the entire data cache.
+ *
+ *	inv_dcache_all()
+ *
+ *		Unconditionally invalidate the entire data cache.
  */
 
 struct cpu_cache_fns {
@@ -211,17 +220,23 @@ struct cpu_cache_fns {
 
 	void (*coherent_kern_range)(unsigned long, unsigned long);
 	void (*coherent_user_range)(unsigned long, unsigned long);
-	void (*flush_kern_dcache_page)(void *);
+	void (*flush_kern_dcache_area)(void *, size_t);
+
+	void (*dma_map_area)(const void *, size_t, int);
+	void (*dma_unmap_area)(const void *, size_t, int);
 
 	void (*dma_inv_range)(const void *, const void *);
 	void (*dma_clean_range)(const void *, const void *);
 	void (*dma_flush_range)(const void *, const void *);
-};
 
-struct outer_cache_fns {
-	void (*inv_range)(unsigned long, unsigned long);
-	void (*clean_range)(unsigned long, unsigned long);
-	void (*flush_range)(unsigned long, unsigned long);
+#if defined(CONFIG_CPU_V7)
+	void (*dma_inv_user_range)(const void *, const void *);
+	void (*dma_clean_user_range)(const void *, const void *);
+	void (*dma_flush_user_range)(const void *, const void *);
+	void (*flush_dcache_all)(void);
+	void (*clean_dcache_all)(void);
+	void (*inv_dcache_all)(void);
+#endif
 };
 
 /*
@@ -236,7 +251,7 @@ extern struct cpu_cache_fns cpu_cache;
 #define __cpuc_flush_user_range		cpu_cache.flush_user_range
 #define __cpuc_coherent_kern_range	cpu_cache.coherent_kern_range
 #define __cpuc_coherent_user_range	cpu_cache.coherent_user_range
-#define __cpuc_flush_dcache_page	cpu_cache.flush_kern_dcache_page
+#define __cpuc_flush_dcache_area	cpu_cache.flush_kern_dcache_area
 
 /*
  * These are private to the dma-mapping API.  Do not use directly.
@@ -244,9 +259,16 @@ extern struct cpu_cache_fns cpu_cache;
  * is visible to DMA, or data written by DMA to system memory is
  * visible to the CPU.
  */
+#define dmac_map_area			cpu_cache.dma_map_area
+#define dmac_unmap_area		cpu_cache.dma_unmap_area
 #define dmac_inv_range			cpu_cache.dma_inv_range
 #define dmac_clean_range		cpu_cache.dma_clean_range
 #define dmac_flush_range		cpu_cache.dma_flush_range
+#if defined(CONFIG_CPU_V7)
+#define dmac_inv_user_range		cpu_cache.dma_inv_user_range
+#define dmac_clean_user_range		cpu_cache.dma_clean_user_range
+#define dmac_flush_user_range		cpu_cache.dma_flush_user_range
+#endif
 
 #else
 
@@ -255,14 +277,14 @@ extern struct cpu_cache_fns cpu_cache;
 #define __cpuc_flush_user_range		__glue(_CACHE,_flush_user_cache_range)
 #define __cpuc_coherent_kern_range	__glue(_CACHE,_coherent_kern_range)
 #define __cpuc_coherent_user_range	__glue(_CACHE,_coherent_user_range)
-#define __cpuc_flush_dcache_page	__glue(_CACHE,_flush_kern_dcache_page)
+#define __cpuc_flush_dcache_area	__glue(_CACHE,_flush_kern_dcache_area)
 
 extern void __cpuc_flush_kern_all(void);
 extern void __cpuc_flush_user_all(void);
 extern void __cpuc_flush_user_range(unsigned long, unsigned long, unsigned int);
 extern void __cpuc_coherent_kern_range(unsigned long, unsigned long);
 extern void __cpuc_coherent_user_range(unsigned long, unsigned long);
-extern void __cpuc_flush_dcache_page(void *);
+extern void __cpuc_flush_dcache_area(void *, size_t);
 
 /*
  * These are private to the dma-mapping API.  Do not use directly.
@@ -270,44 +292,17 @@ extern void __cpuc_flush_dcache_page(void *);
  * is visible to DMA, or data written by DMA to system memory is
  * visible to the CPU.
  */
+#define dmac_map_area			__glue(_CACHE,_dma_map_area)
+#define dmac_unmap_area		__glue(_CACHE,_dma_unmap_area)
 #define dmac_inv_range			__glue(_CACHE,_dma_inv_range)
 #define dmac_clean_range		__glue(_CACHE,_dma_clean_range)
 #define dmac_flush_range		__glue(_CACHE,_dma_flush_range)
 
+extern void dmac_map_area(const void *, size_t, int);
+extern void dmac_unmap_area(const void *, size_t, int);
 extern void dmac_inv_range(const void *, const void *);
 extern void dmac_clean_range(const void *, const void *);
 extern void dmac_flush_range(const void *, const void *);
-
-#endif
-
-#ifdef CONFIG_OUTER_CACHE
-
-extern struct outer_cache_fns outer_cache;
-
-static inline void outer_inv_range(unsigned long start, unsigned long end)
-{
-	if (outer_cache.inv_range)
-		outer_cache.inv_range(start, end);
-}
-static inline void outer_clean_range(unsigned long start, unsigned long end)
-{
-	if (outer_cache.clean_range)
-		outer_cache.clean_range(start, end);
-}
-static inline void outer_flush_range(unsigned long start, unsigned long end)
-{
-	if (outer_cache.flush_range)
-		outer_cache.flush_range(start, end);
-}
-
-#else
-
-static inline void outer_inv_range(unsigned long start, unsigned long end)
-{ }
-static inline void outer_clean_range(unsigned long start, unsigned long end)
-{ }
-static inline void outer_flush_range(unsigned long start, unsigned long end)
-{ }
 
 #endif
 
@@ -316,12 +311,8 @@ static inline void outer_flush_range(unsigned long start, unsigned long end)
  * processes address space.  Really, we want to allow our "user
  * space" model to handle this.
  */
-#define copy_to_user_page(vma, page, vaddr, dst, src, len) \
-	do {							\
-		memcpy(dst, src, len);				\
-		flush_ptrace_access(vma, page, vaddr, dst, len, 1);\
-	} while (0)
-
+extern void copy_to_user_page(struct vm_area_struct *, struct page *,
+	unsigned long, void *, const void *, unsigned long);
 #define copy_from_user_page(vma, page, vaddr, dst, src, len) \
 	do {							\
 		memcpy(dst, src, len);				\
@@ -331,15 +322,24 @@ static inline void outer_flush_range(unsigned long start, unsigned long end)
  * Convert calls to our calling convention.
  */
 #define flush_cache_all()		__cpuc_flush_kern_all()
-#ifndef CONFIG_CPU_CACHE_VIPT
-static inline void flush_cache_mm(struct mm_struct *mm)
+#if defined(CONFIG_CPU_V7)
+#define flush_dcache_all()		cpu_cache.flush_dcache_all()
+#define clean_dcache_all()		cpu_cache.clean_dcache_all()
+#define inv_dcache_all()		cpu_cache.inv_dcache_all()
+#else	/* fix me */
+#define flush_dcache_all()		{}
+#define clean_dcache_all()		{}
+#define inv_dcache_all()		{}
+#endif
+
+static inline void vivt_flush_cache_mm(struct mm_struct *mm)
 {
 	if (cpumask_test_cpu(smp_processor_id(), mm_cpumask(mm)))
 		__cpuc_flush_user_all();
 }
 
 static inline void
-flush_cache_range(struct vm_area_struct *vma, unsigned long start, unsigned long end)
+vivt_flush_cache_range(struct vm_area_struct *vma, unsigned long start, unsigned long end)
 {
 	if (cpumask_test_cpu(smp_processor_id(), mm_cpumask(vma->vm_mm)))
 		__cpuc_flush_user_range(start & PAGE_MASK, PAGE_ALIGN(end),
@@ -347,7 +347,7 @@ flush_cache_range(struct vm_area_struct *vma, unsigned long start, unsigned long
 }
 
 static inline void
-flush_cache_page(struct vm_area_struct *vma, unsigned long user_addr, unsigned long pfn)
+vivt_flush_cache_page(struct vm_area_struct *vma, unsigned long user_addr, unsigned long pfn)
 {
 	if (cpumask_test_cpu(smp_processor_id(), mm_cpumask(vma->vm_mm))) {
 		unsigned long addr = user_addr & PAGE_MASK;
@@ -355,23 +355,17 @@ flush_cache_page(struct vm_area_struct *vma, unsigned long user_addr, unsigned l
 	}
 }
 
-static inline void
-flush_ptrace_access(struct vm_area_struct *vma, struct page *page,
-			 unsigned long uaddr, void *kaddr,
-			 unsigned long len, int write)
-{
-	if (cpumask_test_cpu(smp_processor_id(), mm_cpumask(vma->vm_mm))) {
-		unsigned long addr = (unsigned long)kaddr;
-		__cpuc_coherent_kern_range(addr, addr + len);
-	}
-}
+#ifndef CONFIG_CPU_CACHE_VIPT
+#define flush_cache_mm(mm) \
+		vivt_flush_cache_mm(mm)
+#define flush_cache_range(vma,start,end) \
+		vivt_flush_cache_range(vma,start,end)
+#define flush_cache_page(vma,addr,pfn) \
+		vivt_flush_cache_page(vma,addr,pfn)
 #else
 extern void flush_cache_mm(struct mm_struct *mm);
 extern void flush_cache_range(struct vm_area_struct *vma, unsigned long start, unsigned long end);
 extern void flush_cache_page(struct vm_area_struct *vma, unsigned long user_addr, unsigned long pfn);
-extern void flush_ptrace_access(struct vm_area_struct *vma, struct page *page,
-				unsigned long uaddr, void *kaddr,
-				unsigned long len, int write);
 #endif
 
 #define flush_cache_dup_mm(mm) flush_cache_mm(mm)
@@ -408,6 +402,7 @@ extern void flush_ptrace_access(struct vm_area_struct *vma, struct page *page,
  * about to change to user space.  This is the same method as used on SPARC64.
  * See update_mmu_cache for the user space part.
  */
+#define ARCH_IMPLEMENTS_FLUSH_DCACHE_PAGE 1
 extern void flush_dcache_page(struct page *);
 
 extern void __flush_dcache_page(struct address_space *mapping, struct page *page);
@@ -417,6 +412,10 @@ static inline void __flush_icache_all(void)
 #ifdef CONFIG_ARM_ERRATA_411920
 	extern void v6_icache_inval_all(void);
 	v6_icache_inval_all();
+#elif defined(CONFIG_SMP) && __LINUX_ARM_ARCH__ >= 7
+	asm("mcr	p15, 0, %0, c7, c1, 0	@ invalidate I-cache inner shareable\n"
+	    :
+	    : "r" (0));
 #else
 	asm("mcr	p15, 0, %0, c7, c5, 0	@ invalidate I-cache\n"
 	    :
@@ -439,7 +438,7 @@ static inline void flush_kernel_dcache_page(struct page *page)
 {
 	/* highmem pages are always flushed upon kunmap already */
 	if ((cache_is_vivt() || cache_is_vipt_aliasing()) && !PageHighMem(page))
-		__cpuc_flush_dcache_page(page_address(page));
+		__cpuc_flush_dcache_area(page_address(page), PAGE_SIZE);
 }
 
 #define flush_dcache_mmap_lock(mapping) \

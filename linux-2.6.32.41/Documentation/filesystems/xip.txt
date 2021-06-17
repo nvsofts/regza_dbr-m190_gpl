@@ -49,6 +49,8 @@ This address space operation is mutually exclusive with readpage&writepage that
 do page cache read/write operations.
 The following filesystems support it as of today:
 - ext2: the second extended filesystem, see Documentation/filesystems/ext2.txt
+- pramfs: persistent and protected RAM filesystem, see
+  Documentation/filesystems/pramfs.txt
 
 A set of file operations that do utilize get_xip_page can be found in
 mm/filemap_xip.c . The following file operation implementations are provided:

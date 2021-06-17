@@ -47,6 +47,13 @@
 #include "squashfs_fs_i.h"
 #include "squashfs.h"
 
+#ifdef CONFIG_SQUASHFS_LINEAR
+#include <linux/backing-dev.h>
+static struct backing_dev_info squashfs_backing_dev_info = {
+	.ra_pages	= 0,	/* No readahead */
+};
+#endif
+
 /*
  * Initialise VFS inode with the base inode information common to all
  * Squashfs inode types.  Sqsh_ino contains the unswapped base inode
@@ -55,6 +62,9 @@
 static int squashfs_new_inode(struct super_block *sb, struct inode *inode,
 				struct squashfs_base_inode *sqsh_ino)
 {
+#ifdef CONFIG_SQUASHFS_LINEAR
+	struct squashfs_sb_info *msblk = sb->s_fs_info;
+#endif
 	int err;
 
 	err = squashfs_get_id(sb, le16_to_cpu(sqsh_ino->uid), &inode->i_uid);
@@ -71,6 +81,10 @@ static int squashfs_new_inode(struct super_block *sb, struct inode *inode,
 	inode->i_ctime.tv_sec = inode->i_mtime.tv_sec;
 	inode->i_mode = le16_to_cpu(sqsh_ino->mode);
 	inode->i_size = 0;
+#ifdef CONFIG_SQUASHFS_LINEAR
+	if (LINEAR(msblk))
+		inode->i_mapping->backing_dev_info = &squashfs_backing_dev_info;
+#endif
 
 	return err;
 }

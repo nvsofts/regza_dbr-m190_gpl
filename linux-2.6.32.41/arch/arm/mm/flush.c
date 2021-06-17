@@ -13,6 +13,7 @@
 
 #include <asm/cacheflush.h>
 #include <asm/cachetype.h>
+#include <asm/smp_plat.h>
 #include <asm/system.h>
 #include <asm/tlbflush.h>
 
@@ -35,14 +36,24 @@ static void flush_pfn_alias(unsigned long pfn, unsigned long vaddr)
 	    :
 	    : "r" (to), "r" (to + PAGE_SIZE - L1_CACHE_BYTES), "r" (zero)
 	    : "cc");
-	__flush_icache_all();
+}
+
+static void flush_icache_alias(unsigned long pfn, unsigned long vaddr, unsigned long len)
+{
+	unsigned long colour = CACHE_COLOUR(vaddr);
+	unsigned long offset = vaddr & (PAGE_SIZE - 1);
+	unsigned long to;
+
+	set_pte_ext(TOP_PTE(ALIAS_FLUSH_START) + colour, pfn_pte(pfn, PAGE_KERNEL), 0);
+	to = ALIAS_FLUSH_START + (colour << PAGE_SHIFT) + offset;
+	flush_tlb_kernel_page(to);
+	flush_icache_range(to, to + len);
 }
 
 void flush_cache_mm(struct mm_struct *mm)
 {
 	if (cache_is_vivt()) {
-		if (cpumask_test_cpu(smp_processor_id(), mm_cpumask(mm)))
-			__cpuc_flush_user_all();
+		vivt_flush_cache_mm(mm);
 		return;
 	}
 
@@ -59,9 +70,7 @@ void flush_cache_mm(struct mm_struct *mm)
 void flush_cache_range(struct vm_area_struct *vma, unsigned long start, unsigned long end)
 {
 	if (cache_is_vivt()) {
-		if (cpumask_test_cpu(smp_processor_id(), mm_cpumask(vma->vm_mm)))
-			__cpuc_flush_user_range(start & PAGE_MASK, PAGE_ALIGN(end),
-						vma->vm_flags);
+		vivt_flush_cache_range(vma, start, end);
 		return;
 	}
 
@@ -71,27 +80,43 @@ void flush_cache_range(struct vm_area_struct *vma, unsigned long start, unsigned
 		    :
 		    : "r" (0)
 		    : "cc");
-		__flush_icache_all();
 	}
+
+	if (vma->vm_flags & VM_EXEC)
+		__flush_icache_all();
 }
 
 void flush_cache_page(struct vm_area_struct *vma, unsigned long user_addr, unsigned long pfn)
 {
 	if (cache_is_vivt()) {
-		if (cpumask_test_cpu(smp_processor_id(), mm_cpumask(vma->vm_mm))) {
-			unsigned long addr = user_addr & PAGE_MASK;
-			__cpuc_flush_user_range(addr, addr + PAGE_SIZE, vma->vm_flags);
-		}
+		vivt_flush_cache_page(vma, user_addr, pfn);
 		return;
 	}
 
-	if (cache_is_vipt_aliasing())
+	if (cache_is_vipt_aliasing()) {
 		flush_pfn_alias(pfn, user_addr);
+		__flush_icache_all();
+	}
+
+	if (vma->vm_flags & VM_EXEC && icache_is_vivt_asid_tagged())
+		__flush_icache_all();
 }
 
+#else
+#define flush_pfn_alias(pfn,vaddr)		do { } while (0)
+#define flush_icache_alias(pfn,vaddr,len)	do { } while (0)
+#endif
+
+#ifdef CONFIG_SMP
+static void flush_ptrace_access_other(void *args)
+{
+	__flush_icache_all();
+}
+#endif
+
+static
 void flush_ptrace_access(struct vm_area_struct *vma, struct page *page,
-			 unsigned long uaddr, void *kaddr,
-			 unsigned long len, int write)
+			 unsigned long uaddr, void *kaddr, unsigned long len)
 {
 	if (cache_is_vivt()) {
 		if (cpumask_test_cpu(smp_processor_id(), mm_cpumask(vma->vm_mm))) {
@@ -103,20 +128,45 @@ void flush_ptrace_access(struct vm_area_struct *vma, struct page *page,
 
 	if (cache_is_vipt_aliasing()) {
 		flush_pfn_alias(page_to_pfn(page), uaddr);
+		__flush_icache_all();
 		return;
 	}
 
-	/* VIPT non-aliasing cache */
-	if (cpumask_test_cpu(smp_processor_id(), mm_cpumask(vma->vm_mm)) &&
-	    vma->vm_flags & VM_EXEC) {
+	/* VIPT non-aliasing D-cache */
+	if (vma->vm_flags & VM_EXEC) {
 		unsigned long addr = (unsigned long)kaddr;
-		/* only flushing the kernel mapping on non-aliasing VIPT */
-		__cpuc_coherent_kern_range(addr, addr + len);
+		if (icache_is_vipt_aliasing())
+			flush_icache_alias(page_to_pfn(page), uaddr, len);
+		else
+			__cpuc_coherent_kern_range(addr, addr + len);
+#ifdef CONFIG_SMP
+		if (cache_ops_need_broadcast())
+			smp_call_function(flush_ptrace_access_other,
+					  NULL, 1);
+#endif
 	}
 }
-#else
-#define flush_pfn_alias(pfn,vaddr)	do { } while (0)
+
+/*
+ * Copy user data from/to a page which is mapped into a different
+ * processes address space.  Really, we want to allow our "user
+ * space" model to handle this.
+ *
+ * Note that this code needs to run on the current CPU.
+ */
+void copy_to_user_page(struct vm_area_struct *vma, struct page *page,
+		       unsigned long uaddr, void *dst, const void *src,
+		       unsigned long len)
+{
+#ifdef CONFIG_SMP
+	preempt_disable();
 #endif
+	memcpy(dst, src, len);
+	flush_ptrace_access(vma, page, uaddr, dst, len);
+#ifdef CONFIG_SMP
+	preempt_enable();
+#endif
+}
 
 void __flush_dcache_page(struct address_space *mapping, struct page *page)
 {
@@ -132,16 +182,18 @@ void __flush_dcache_page(struct address_space *mapping, struct page *page)
 	 */
 	if (page_address(page))
 #endif
-		__cpuc_flush_dcache_page(page_address(page));
+		__cpuc_flush_dcache_area(page_address(page), PAGE_SIZE);
 
 	/*
 	 * If this is a page cache page, and we have an aliasing VIPT cache,
 	 * we only need to do one flush - which would be at the relevant
 	 * userspace colour, which is congruent with page->index.
 	 */
-	if (mapping && cache_is_vipt_aliasing())
+	if (mapping && cache_is_vipt_aliasing()) {
 		flush_pfn_alias(page_to_pfn(page),
 				page->index << PAGE_CACHE_SHIFT);
+		__flush_icache_all();
+	}
 }
 
 static void __flush_dcache_aliases(struct address_space *mapping, struct page *page)
@@ -242,6 +294,7 @@ void __flush_anon_page(struct vm_area_struct *vma, struct page *page, unsigned l
 		 * userspace address only.
 		 */
 		flush_pfn_alias(pfn, vmaddr);
+		__flush_icache_all();
 	}
 
 	/*
@@ -249,5 +302,5 @@ void __flush_anon_page(struct vm_area_struct *vma, struct page *page, unsigned l
 	 * in this mapping of the page.  FIXME: this is overkill
 	 * since we actually ask for a write-back and invalidate.
 	 */
-	__cpuc_flush_dcache_page(page_address(page));
+	__cpuc_flush_dcache_area(page_address(page), PAGE_SIZE);
 }

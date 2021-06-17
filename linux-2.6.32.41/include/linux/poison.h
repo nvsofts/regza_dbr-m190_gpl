@@ -89,6 +89,10 @@
 /********** lib/flex_array.c **********/
 #define FLEX_ARRAY_FREE	0x6c	/* for use-after-free poisoning */
 
+/********** Priority-Sifting Reader-Writer Locks **********/
+#define PSRWLOCK_DEBUG_INIT	0x33
+#define PSRWLOCK_DEBUG_FREE	0x44
+
 /********** security/ **********/
 #define KEY_DESTROY		0xbd
 

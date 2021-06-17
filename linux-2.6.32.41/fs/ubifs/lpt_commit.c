@@ -1144,6 +1144,7 @@ static int lpt_gc_lnum(struct ubifs_info *c, int lnum)
 {
 	int err, len = c->leb_size, node_type, node_num, node_len, offs;
 	void *buf = c->lpt_buf;
+	int found_node = 0;
 
 	dbg_lp("LEB %d", lnum);
 	err = ubi_read(c->ubi, lnum, buf, 0, c->leb_size);
@@ -1161,8 +1162,14 @@ static int lpt_gc_lnum(struct ubifs_info *c, int lnum)
 				len -= pad_len;
 				continue;
 			}
-			return 0;
+			if (found_node)
+				return 0;
+			else
+				return -1;  /* could not find any nodes */
 		}
+
+		found_node = 1;
+
 		node_type = get_lpt_node_type(c, buf, &node_num);
 		node_len = get_lpt_node_len(c, node_type);
 		offs = c->leb_size - len;

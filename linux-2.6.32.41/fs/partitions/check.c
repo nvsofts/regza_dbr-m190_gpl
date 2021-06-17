@@ -41,10 +41,17 @@
 #ifdef CONFIG_BLK_DEV_MD
 extern void md_autodetect_dev(dev_t dev);
 #endif
+#ifdef CONFIG_ARBITRARY_PARTITION
+static int arb_partition_check(struct parsed_partitions *state,
+			       struct block_device *bdev);
+#endif
 
 int warn_no_part = 1; /*This is ugly: should make genhd removable media aware*/
 
 static int (*check_part[])(struct parsed_partitions *, struct block_device *) = {
+#ifdef CONFIG_ARBITRARY_PARTITION
+	arb_partition_check,
+#endif
 	/*
 	 * Probe partition formats with tables at disk address 0
 	 * that also have an ADFS boot block at 0xdc0.
@@ -677,3 +684,261 @@ void del_gendisk(struct gendisk *disk)
 #endif
 	device_del(disk_to_dev(disk));
 }
+
+#ifdef CONFIG_ARBITRARY_PARTITION
+/*
+ * based on cmdlinepart.c
+ *
+ * The format for the command line is as follows:
+ *
+ * arbparts=<arbdef>[;<arbdef]
+ * <arbdef>  := <arb-id>:<partdef>[,<partdef>]
+ * <partdef> := <size>[@offset]
+ * <arb-id> := master block device name
+ * <size>    := standard linux memsize OR "-" to denote all remaining space
+ */
+
+/* error message prefix */
+#define ERRP "arb: "
+
+/* special size referring to all the remaining space in a partition */
+#define SIZE_REMAINING UINT_MAX
+#define OFFSET_CONTINUOUS UINT_MAX
+
+struct arb_partition {
+	u_int32_t size;			/* partition size */
+	u_int32_t offset;		/* offset within the master device */
+};
+
+struct cmdline_arb_partition {
+	struct cmdline_arb_partition *next;
+	char *arb_id;
+	int num_parts;
+	struct arb_partition *parts;
+};
+
+/* arbpart_setup() parses into here */
+static struct cmdline_arb_partition *partitions;
+
+/* the command line passed to arbpart_setup() */
+static char *cmdline;
+static int cmdline_parsed;
+
+/*
+ * Parse one partition definition for an block device. Since there can
+ * be many comma separated partition definitions, this function calls
+ * itself recursively until no more partition definitions are
+ * found. Nice side effect: the memory to keep the arb_partition
+ * structs is allocated upon the last definition being found. At that
+ * point the syntax has been verified ok.
+ */
+static struct arb_partition *newpart(char *s,
+				     char **retptr,
+				     int *num_parts,
+				     int this_part,
+				     unsigned char **extra_mem_ptr,
+				     int extra_mem_size)
+{
+	struct arb_partition *parts;
+	unsigned long size;
+	unsigned long offset = OFFSET_CONTINUOUS;
+	unsigned char *extra_mem;
+
+	/* fetch the partition size */
+	if (*s == '-') {
+		/* assign all remaining space to this partition */
+		size = SIZE_REMAINING;
+		s++;
+	} else {
+		size = memparse(s, &s);
+		if (size < PAGE_SIZE) {
+			printk(KERN_ERR ERRP "partition size too small"
+			       " (%lx)\n", size);
+			return NULL;
+		}
+	}
+
+	/* check for offset */
+	if (*s == '@') {
+		s++;
+		offset = memparse(s, &s);
+	}
+
+	/* test if more partitions are following */
+	if (*s == ',') {
+		if (size == SIZE_REMAINING) {
+			printk(KERN_ERR ERRP "no partitions allowed "
+			       "after a fill-up partition\n");
+			return NULL;
+		}
+		/* more partitions follow, parse them */
+		parts = newpart(s + 1, &s, num_parts,
+				this_part + 1, &extra_mem, extra_mem_size);
+		if (!parts)
+			return NULL;
+	} else {
+		/* this is the last partition: allocate space for all */
+		int alloc_size;
+
+		*num_parts = this_part + 1;
+		alloc_size = *num_parts * sizeof(struct arb_partition) +
+			extra_mem_size;
+		parts = kzalloc(alloc_size, GFP_KERNEL);
+		if (!parts) {
+			printk(KERN_ERR ERRP "out of memory\n");
+			return NULL;
+		}
+		extra_mem = (unsigned char *)(parts + *num_parts);
+	}
+	/* enter this partition (offset will be calculated later if it is
+	   zero at this point) */
+	parts[this_part].size = size;
+	parts[this_part].offset = offset;
+
+	/* return (updated) pointer to extra_mem memory */
+	if (extra_mem_ptr)
+		*extra_mem_ptr = extra_mem;
+
+	/* return (updated) pointer command line string */
+	*retptr = s;
+
+	/* return partition table */
+	return parts;
+}
+
+/*
+ * Parse the command line.
+ */
+static int arbpart_setup_real(char *s)
+{
+	cmdline_parsed = 1;
+
+	for ( ; s != NULL; ) {
+		struct cmdline_arb_partition *this;
+		struct arb_partition *parts;
+		int arb_id_len;
+		int num_parts;
+		char *p, *arb_id;
+
+		arb_id = s;
+		/* fetch <arb-id> */
+		p = strchr(s, ':');
+		if (!p) {
+			printk(KERN_ERR ERRP "no arb-id\n");
+			return 0;
+		}
+		arb_id_len = p - arb_id;
+
+		/*
+		 * parse one device. have it reserve memory for the
+		 * struct cmdline_arb_partition.
+		 */
+		parts = newpart(p + 1,		/* cmdline */
+				&s,		/* out: updated cmdline ptr */
+				&num_parts,	/* out: number of parts */
+				0,		/* first partition */
+				(unsigned char **)&this, /* out: extra mem */
+				arb_id_len + 1 + sizeof(*this));
+		if (!parts) {
+			/*
+			 * An error occurred. We're either:
+			 * a) out of memory, or
+			 * b) in the middle of the partition spec
+			 * Either way, this device is hosed and we're
+			 * unlikely to succeed in parsing any more
+			 */
+			return 0;
+		}
+
+		/* enter results */
+		this->parts = parts;
+		this->num_parts = num_parts;
+		this->arb_id = (char *)(this + 1);
+		strlcpy(this->arb_id, arb_id, arb_id_len + 1);
+
+		/* link into chain */
+		this->next = partitions;
+		partitions = this;
+
+		/* EOS - we're done */
+		if (*s == 0)
+			break;
+
+		/* does another spec follow? */
+		if (*s != ';') {
+			printk(KERN_ERR ERRP "bad character after partition "
+			       "(%c)\n", *s);
+			return 0;
+		}
+		s++;
+	}
+	return 1;
+}
+
+/*
+ * Main function to be called from check_partition() to
+ * obtain the partitioning information. At this point the command line
+ * arguments will actually be parsed and turned to struct arb_partition
+ * information.
+ */
+static int arb_partition_check(struct parsed_partitions *state,
+			       struct block_device *bdev)
+{
+	unsigned long offset;
+	int i;
+	int slot;
+	struct cmdline_arb_partition *part;
+	char name[BDEVNAME_SIZE];
+
+	if (!cmdline)
+		return 0;
+
+	/* parse command line */
+	if (!cmdline_parsed)
+		arbpart_setup_real(cmdline);
+
+	bdevname(bdev, name);
+	for (part = partitions; part; part = part->next) {
+		if (strcmp(name, part->arb_id))
+			continue;
+		for (i = 0, offset = 0; i < part->num_parts; i++) {
+			unsigned long capa = get_capacity(bdev->bd_disk) * 512;
+			if (part->parts[i].offset == OFFSET_CONTINUOUS)
+				part->parts[i].offset = offset;
+			else
+				offset = part->parts[i].offset;
+			if (part->parts[i].size == SIZE_REMAINING)
+				part->parts[i].size = capa - offset;
+			if (offset + part->parts[i].size > capa) {
+				printk(KERN_WARNING ERRP
+				       "%s: partitioning exceeds flash size, "
+				       "truncating\n",
+				       part->arb_id);
+				part->parts[i].size = capa - offset;
+				part->num_parts = i;
+			}
+			offset += part->parts[i].size;
+		}
+		slot = 1;
+		for (i = 0, offset = 0; i < part->num_parts; i++) {
+			if (slot == state->limit)
+				break;
+			put_partition(state, slot,
+				      part->parts[i].offset / 512,
+				      part->parts[i].size / 512);
+			slot++;
+		}
+		printk("\n");
+		return 1;
+	}
+	return 0;
+}
+
+static int arbpart_setup(char *s)
+{
+	cmdline = s;
+	return 1;
+}
+
+__setup("arbparts=", arbpart_setup);
+#endif /* CONFIG_ARBITRARY_PARTITION */

@@ -56,6 +56,8 @@
 #include <linux/kallsyms.h>
 #include <linux/swapops.h>
 #include <linux/elf.h>
+#include <trace/swap.h>
+#include <trace/fault.h>
 
 #include <asm/io.h>
 #include <asm/pgalloc.h>
@@ -65,6 +67,10 @@
 #include <asm/pgtable.h>
 
 #include "internal.h"
+
+DEFINE_TRACE(swap_in);
+DEFINE_TRACE(page_fault_get_user_entry);
+DEFINE_TRACE(page_fault_get_user_exit);
 
 #ifndef CONFIG_NEED_MULTIPLE_NODES
 /* use the per-pgdat data instead for discontigmem - mbligh */
@@ -1330,11 +1336,15 @@ int __get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
 
 			cond_resched();
 			while (!(page = follow_page(vma, start, foll_flags))) {
-				int ret;
+				int ret, write_access;
 
+				write_access = foll_flags & FOLL_WRITE;
+				trace_page_fault_get_user_entry(mm,
+					vma, start, write_access);
 				ret = handle_mm_fault(mm, vma, start,
-					(foll_flags & FOLL_WRITE) ?
+					write_access ?
 					FAULT_FLAG_WRITE : 0);
+				trace_page_fault_get_user_exit(ret);
 
 				if (ret & VM_FAULT_ERROR) {
 					if (ret & VM_FAULT_OOM)
@@ -2549,6 +2559,7 @@ static int do_swap_page(struct mm_struct *mm, struct vm_area_struct *vma,
 		/* Had to read the page from swap area: Major fault */
 		ret = VM_FAULT_MAJOR;
 		count_vm_event(PGMAJFAULT);
+		trace_swap_in(page, entry);
 	} else if (PageHWPoison(page)) {
 		ret = VM_FAULT_HWPOISON;
 		delayacct_clear_flag(DELAYACCT_PF_SWAPIN);
@@ -3425,3 +3436,49 @@ void might_fault(void)
 }
 EXPORT_SYMBOL(might_fault);
 #endif
+
+int writeable_kernel_pte_range(unsigned long address, unsigned long size,
+							      unsigned int rw)
+{
+
+	unsigned long addr = address & PAGE_MASK;
+	unsigned long end = address + size;
+	unsigned long start = addr;
+	int ret = -EINVAL;
+	pgd_t *pgd;
+	pud_t *pud;
+	pmd_t *pmd;
+	pte_t *ptep, pte;
+
+	spin_lock_irq(&init_mm.page_table_lock);
+
+	do {
+		pgd = pgd_offset(&init_mm, address);
+		if (pgd_none(*pgd) || unlikely(pgd_bad(*pgd)))
+			goto out;
+
+		pud = pud_offset(pgd, address);
+		if (pud_none(*pud) || unlikely(pud_bad(*pud)))
+			goto out;
+
+		pmd = pmd_offset(pud, address);
+		if (pmd_none(*pmd) || unlikely(pmd_bad(*pmd)))
+			goto out;
+
+		ptep = pte_offset_kernel(pmd, addr);
+		pte = *ptep;
+		if (pte_present(pte)) {
+			pte = rw ? pte_mkwrite(pte) : pte_wrprotect(pte);
+			*ptep = pte;
+		}
+		addr += PAGE_SIZE;
+	} while (addr && (addr < end));
+
+	ret = 0;
+
+out:
+	flush_tlb_kernel_range(start, end);
+	spin_unlock_irq(&init_mm.page_table_lock);
+	return ret;
+}
+EXPORT_SYMBOL(writeable_kernel_pte_range);

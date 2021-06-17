@@ -15,6 +15,7 @@
 #include <linux/of.h>
 #include <linux/of_i2c.h>
 #include <linux/module.h>
+#include <linux/of_irq.h>
 
 void of_register_i2c_devices(struct i2c_adapter *adap,
 			     struct device_node *adap_node)
@@ -25,7 +26,7 @@ void of_register_i2c_devices(struct i2c_adapter *adap,
 	for_each_child_of_node(adap_node, node) {
 		struct i2c_board_info info = {};
 		struct dev_archdata dev_ad = {};
-		const u32 *addr;
+		const __be32 *addr;
 		int len;
 
 		if (of_modalias_node(node, info.type, sizeof(info.type)) < 0)
@@ -40,7 +41,7 @@ void of_register_i2c_devices(struct i2c_adapter *adap,
 
 		info.irq = irq_of_parse_and_map(node, 0);
 
-		info.addr = *addr;
+		info.addr = be32_to_cpup(addr);
 
 		dev_archdata_set_node(&dev_ad, node);
 		info.archdata = &dev_ad;

@@ -27,7 +27,7 @@ INITRD_PHYS := $(initrd_phys-y)
 
 export ZRELADDR INITRD_PHYS PARAMS_PHYS
 
-targets := Image zImage xipImage bootpImage uImage
+targets := Image zImage xipImage bootpImage uImage dtbImage
 
 ifeq ($(CONFIG_XIP_KERNEL),y)
 
@@ -86,6 +86,14 @@ $(obj)/bootp/bootp: $(obj)/zImage initrd FORCE
 	@:
 
 $(obj)/bootpImage: $(obj)/bootp/bootp FORCE
+	$(call if_changed,objcopy)
+	@echo '  Kernel: $@ is ready'
+
+$(obj)/dt/dtb: $(obj)/zImage FORCE
+	$(Q)$(MAKE) $(build)=$(obj)/dt $@
+	@:
+
+$(obj)/dtbImage: $(obj)/dt/dtb FORCE
 	$(call if_changed,objcopy)
 	@echo '  Kernel: $@ is ready'
 

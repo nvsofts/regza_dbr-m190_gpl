@@ -789,6 +789,13 @@ int follow_phys(struct vm_area_struct *vma, unsigned long address,
 		unsigned int flags, unsigned long *prot, resource_size_t *phys);
 int generic_access_phys(struct vm_area_struct *vma, unsigned long addr,
 			void *buf, int len, int write);
+int writeable_kernel_pte_range(unsigned long address, unsigned long size,
+				unsigned int rw);
+
+#define write_on_kernel_pte_range(addr, size) \
+	writeable_kernel_pte_range(addr, size, 1)
+#define write_off_kernel_pte_range(addr, size) \
+	writeable_kernel_pte_range(addr, size, 0)
 
 static inline void unmap_shared_mapping_range(struct address_space *mapping,
 		loff_t const holebegin, loff_t const holelen)

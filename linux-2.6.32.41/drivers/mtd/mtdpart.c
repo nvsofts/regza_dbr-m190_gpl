@@ -225,6 +225,9 @@ static int part_erase(struct mtd_info *mtd, struct erase_info *instr)
 	if (instr->addr >= mtd->size)
 		return -EINVAL;
 	instr->addr += part->offset;
+#ifdef CONFIG_MTD_CHAR_MEMSETFORCEERASE
+	part->master->flag_force_erase_badblock = mtd->flag_force_erase_badblock;
+#endif
 	ret = part->master->erase(part->master, instr);
 	if (ret) {
 		if (instr->fail_addr != MTD_FAIL_ADDR_UNKNOWN)
@@ -233,6 +236,22 @@ static int part_erase(struct mtd_info *mtd, struct erase_info *instr)
 	}
 	return ret;
 }
+
+#if defined(CONFIG_MTD_NAND) || defined(CONFIG_MTD_NAND_MODULE)
+static int part_errstat_get(struct mtd_info *mtd, int state,
+			    struct nand_errstat_cmd **esc, size_t *count)
+{
+	struct mtd_part *part = PART(mtd);
+	return part->master->errstat_get(part->master, state, esc, count);
+}
+
+static int part_errstat_set(struct mtd_info *mtd, int state,
+			    struct nand_errstat_cmd *esc, size_t count)
+{
+	struct mtd_part *part = PART(mtd);
+	return part->master->errstat_set(part->master, state, esc, count);
+}
+#endif
 
 void mtd_erase_callback(struct erase_info *instr)
 {
@@ -406,6 +425,12 @@ static struct mtd_part *add_one_partition(struct mtd_info *master,
 		slave->mtd.block_isbad = part_block_isbad;
 	if (master->block_markbad)
 		slave->mtd.block_markbad = part_block_markbad;
+#if defined(CONFIG_MTD_NAND) || defined(CONFIG_MTD_NAND_MODULE)
+	if (master->errstat_get)
+		slave->mtd.errstat_get = part_errstat_get;
+	if (master->errstat_set)
+		slave->mtd.errstat_set = part_errstat_set;
+#endif
 	slave->mtd.erase = part_erase;
 	slave->master = master;
 	slave->offset = part->offset;

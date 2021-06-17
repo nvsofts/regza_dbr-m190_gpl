@@ -198,6 +198,10 @@ config MTD_CFI_AMDSTD
 	  provides support for one of those command sets, used on chips
 	  including the AMD Am29LV320.
 
+config MTD_CFI_AMDSTD_USE_DQ7_CHECK
+	bool "Use DQ7 bit when chip_ready check"
+	depends on MTD_CFI_AMDSTD
+
 config MTD_CFI_STAA
 	tristate "Support for ST (Advanced Architecture) flash chips"
 	depends on MTD_GEN_PROBE

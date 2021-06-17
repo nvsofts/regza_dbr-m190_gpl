@@ -33,6 +33,7 @@
 #include <linux/bootmem.h>
 #include <linux/syscalls.h>
 #include <linux/kexec.h>
+#include <trace/kernel.h>
 
 #include <asm/uaccess.h>
 
@@ -66,6 +67,7 @@ int console_printk[4] = {
 	MINIMUM_CONSOLE_LOGLEVEL,	/* minimum_console_loglevel */
 	DEFAULT_CONSOLE_LOGLEVEL,	/* default_console_loglevel */
 };
+EXPORT_SYMBOL_GPL(console_printk);
 
 static int saved_console_loglevel = -1;
 
@@ -136,6 +138,9 @@ EXPORT_SYMBOL(console_set_on_cmdline);
 
 /* Flag: console code may call schedule() */
 static int console_may_schedule;
+
+DEFINE_TRACE(kernel_printk);
+DEFINE_TRACE(kernel_vprintk);
 
 #ifdef CONFIG_PRINTK
 
@@ -592,6 +597,7 @@ asmlinkage int printk(const char *fmt, ...)
 	int r;
 
 	va_start(args, fmt);
+	_trace_kernel_printk(_RET_IP_);
 	r = vprintk(fmt, args);
 	va_end(args);
 
@@ -714,6 +720,7 @@ asmlinkage int vprintk(const char *fmt, va_list args)
 	printed_len += vscnprintf(printk_buf + printed_len,
 				  sizeof(printk_buf) - printed_len, fmt, args);
 
+	_trace_kernel_vprintk(_RET_IP_, printk_buf, printed_len);
 
 	p = printk_buf;
 

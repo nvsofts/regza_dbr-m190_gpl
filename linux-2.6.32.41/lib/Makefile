@@ -45,6 +45,10 @@ obj-$(CONFIG_DEBUG_PREEMPT) += smp_processor_id.o
 obj-$(CONFIG_DEBUG_LIST) += list_debug.o
 obj-$(CONFIG_DEBUG_OBJECTS) += debugobjects.o
 
+obj-y += psrwlock.o
+obj-$(CONFIG_PSRWLOCK_LATENCY_TEST) += psrwlock-latency-trace.o
+obj-$(CONFIG_DEBUG_PSRWLOCK) += psrwlock-debug.o
+
 ifneq ($(CONFIG_HAVE_DEC_LOCK),y)
   lib-y += dec_and_lock.o
 endif

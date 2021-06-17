@@ -223,17 +223,8 @@ extern struct meminfo meminfo;
 #define bank_phys_end(bank)	((bank)->start + (bank)->size)
 #define bank_phys_size(bank)	(bank)->size
 
-/*
- * Early command line parameters.
- */
-struct early_params {
-	const char *arg;
-	void (*fn)(char **p);
-};
-
-#define __early_param(name,fn)					\
-static struct early_params __early_##fn __used			\
-__attribute__((__section__(".early_param.init"))) = { name, fn }
+extern int arm_add_memory(unsigned long start, unsigned long size);
+extern char cmd_line[COMMAND_LINE_SIZE];
 
 #endif  /*  __KERNEL__  */
 

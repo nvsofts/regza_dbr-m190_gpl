@@ -29,8 +29,11 @@
 #include <linux/personality.h>
 #include <linux/unistd.h>
 #include <linux/ipc.h>
+#include <trace/ipc.h>
 #include <asm/uaccess.h>
 #include "entry.h"
+
+DEFINE_TRACE(ipc_call);
 
 /*
  * Perform the select(nd, in, out, ex, tv) and mmap() system
@@ -87,6 +90,8 @@ SYSCALL_DEFINE5(ipc, uint, call, int, first, unsigned long, second,
 {
         struct ipc_kludge tmp;
 	int ret;
+
+        trace_ipc_call(call, first);
 
         switch (call) {
         case SEMOP:

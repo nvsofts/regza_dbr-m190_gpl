@@ -24,6 +24,7 @@
 #include <linux/interrupt.h>
 #include <linux/smp.h>
 #include <linux/fs.h>
+#include <linux/of_fdt.h>
 
 #include <asm/unified.h>
 #include <asm/cpu.h>
@@ -42,6 +43,7 @@
 #include <asm/mach/time.h>
 #include <asm/traps.h>
 #include <asm/unwind.h>
+#include <asm/devtree.h>
 
 #include "compat.h"
 #include "atags.h"
@@ -102,6 +104,7 @@ struct cpu_cache_fns cpu_cache;
 #endif
 #ifdef CONFIG_OUTER_CACHE
 struct outer_cache_fns outer_cache;
+EXPORT_SYMBOL(outer_cache);
 #endif
 
 struct stack {
@@ -117,7 +120,7 @@ EXPORT_SYMBOL(elf_platform);
 
 static const char *cpu_name;
 static const char *machine_name;
-static char __initdata command_line[COMMAND_LINE_SIZE];
+char cmd_line[COMMAND_LINE_SIZE];
 
 static char default_command_line[COMMAND_LINE_SIZE] __initdata = CONFIG_CMDLINE;
 static union { char c[4]; unsigned long l; } endian_test __initdata = { { 'l', '?', '?', 'b' } };
@@ -231,6 +234,34 @@ int cpu_architecture(void)
 	return cpu_arch;
 }
 
+static int cpu_has_aliasing_icache(unsigned int arch)
+{
+	int aliasing_icache;
+	unsigned int id_reg, num_sets, line_size;
+
+	/* arch specifies the register format */
+	switch (arch) {
+	case CPU_ARCH_ARMv7:
+		asm("mcr	p15, 2, %1, c0, c0, 0	@ set CSSELR\n"
+		    "isb\n"
+		    "mrc	p15, 1, %0, c0, c0, 0	@ read CCSIDR"
+		    : "=r" (id_reg)
+		    : "r" (1));
+		line_size = 4 << ((id_reg & 0x7) + 2);
+		num_sets = ((id_reg >> 13) & 0x7fff) + 1;
+		aliasing_icache = (line_size * num_sets) > PAGE_SIZE;
+		break;
+	case CPU_ARCH_ARMv6:
+		aliasing_icache = read_cpuid_cachetype() & (1 << 11);
+		break;
+	default:
+		/* I-cache aliases will be handled by D-cache aliasing code */
+		aliasing_icache = 0;
+	}
+
+	return aliasing_icache;
+}
+
 static void __init cacheid_init(void)
 {
 	unsigned int cachetype = read_cpuid_cachetype();
@@ -242,10 +273,15 @@ static void __init cacheid_init(void)
 			cacheid = CACHEID_VIPT_NONALIASING;
 			if ((cachetype & (3 << 14)) == 1 << 14)
 				cacheid |= CACHEID_ASID_TAGGED;
-		} else if (cachetype & (1 << 23))
+			else if (cpu_has_aliasing_icache(CPU_ARCH_ARMv7))
+				cacheid |= CACHEID_VIPT_I_ALIASING;
+		} else if (cachetype & (1 << 23)) {
 			cacheid = CACHEID_VIPT_ALIASING;
-		else
+		} else {
 			cacheid = CACHEID_VIPT_NONALIASING;
+			if (cpu_has_aliasing_icache(CPU_ARCH_ARMv6))
+				cacheid |= CACHEID_VIPT_I_ALIASING;
+		}
 	} else {
 		cacheid = CACHEID_VIVT;
 	}
@@ -256,7 +292,7 @@ static void __init cacheid_init(void)
 		cache_is_vipt_nonaliasing() ? "VIPT nonaliasing" : "unknown",
 		cache_is_vivt() ? "VIVT" :
 		icache_is_vivt_asid_tagged() ? "VIVT ASID tagged" :
-		cache_is_vipt_aliasing() ? "VIPT aliasing" :
+		icache_is_vipt_aliasing() ? "VIPT aliasing" :
 		cache_is_vipt_nonaliasing() ? "VIPT nonaliasing" : "unknown");
 }
 
@@ -266,6 +302,21 @@ static void __init cacheid_init(void)
  */
 extern struct proc_info_list *lookup_processor_type(unsigned int);
 extern struct machine_desc *lookup_machine_type(unsigned int);
+
+static void __init feat_v6_fixup(void)
+{
+	int id = read_cpuid_id();
+
+	if ((id & 0xff0f0000) != 0x41070000)
+		return;
+
+	/*
+	 * HWCAP_TLS is available only on 1136 r1p0 and later,
+	 * see also kuser_get_tls_init.
+	 */
+	if ((((id >> 4) & 0xfff) == 0xb36) && (((id >> 20) & 3) == 0))
+		elf_hwcap &= ~HWCAP_TLS;
+}
 
 static void __init setup_processor(void)
 {
@@ -308,6 +359,8 @@ static void __init setup_processor(void)
 #ifndef CONFIG_ARM_THUMB
 	elf_hwcap &= ~HWCAP_THUMB;
 #endif
+
+	feat_v6_fixup();
 
 	cacheid_init();
 	cpu_proc_init();
@@ -383,7 +436,7 @@ static struct machine_desc * __init setup_machine(unsigned int nr)
 	return list;
 }
 
-static int __init arm_add_memory(unsigned long start, unsigned long size)
+int __init arm_add_memory(unsigned long start, unsigned long size)
 {
 	struct membank *bank = &meminfo.bank[meminfo.nr_banks];
 
@@ -417,10 +470,11 @@ static int __init arm_add_memory(unsigned long start, unsigned long size)
  * Pick out the memory size.  We look for mem=size@start,
  * where start and size are "size[KkMm]"
  */
-static void __init early_mem(char **p)
+static int __init early_mem(char *p)
 {
 	static int usermem __initdata = 0;
 	unsigned long size, start;
+	char *endp;
 
 	/*
 	 * If the user specifies memory size, we
@@ -433,52 +487,15 @@ static void __init early_mem(char **p)
 	}
 
 	start = PHYS_OFFSET;
-	size  = memparse(*p, p);
-	if (**p == '@')
-		start = memparse(*p + 1, p);
+	size  = memparse(p, &endp);
+	if (*endp == '@')
+		start = memparse(endp + 1, NULL);
 
 	arm_add_memory(start, size);
+
+	return 0;
 }
-__early_param("mem=", early_mem);
-
-/*
- * Initial parsing of the command line.
- */
-static void __init parse_cmdline(char **cmdline_p, char *from)
-{
-	char c = ' ', *to = command_line;
-	int len = 0;
-
-	for (;;) {
-		if (c == ' ') {
-			extern struct early_params __early_begin, __early_end;
-			struct early_params *p;
-
-			for (p = &__early_begin; p < &__early_end; p++) {
-				int arglen = strlen(p->arg);
-
-				if (memcmp(from, p->arg, arglen) == 0) {
-					if (to != command_line)
-						to -= 1;
-					from += arglen;
-					p->fn(&from);
-
-					while (*from != ' ' && *from != '\0')
-						from++;
-					break;
-				}
-			}
-		}
-		c = *from++;
-		if (!c)
-			break;
-		if (COMMAND_LINE_SIZE <= ++len)
-			break;
-		*to++ = c;
-	}
-	*to = '\0';
-	*cmdline_p = command_line;
-}
+early_param("mem", early_mem);
 
 static void __init
 setup_ramdisk(int doload, int prompt, int image_start, unsigned int rd_sz)
@@ -698,52 +715,73 @@ arch_initcall(customize_machine);
 void __init setup_arch(char **cmdline_p)
 {
 	struct tag *tags = (struct tag *)&init_tags;
-	struct machine_desc *mdesc;
+	struct machine_desc *mdesc = NULL;
 	char *from = default_command_line;
 
 	unwind_init();
 
 	setup_processor();
-	mdesc = setup_machine(machine_arch_type);
-	machine_name = mdesc->name;
-
-	if (mdesc->soft_reboot)
-		reboot_setup("s");
 
 	if (__atags_pointer)
 		tags = phys_to_virt(__atags_pointer);
-	else if (mdesc->boot_params)
-		tags = phys_to_virt(mdesc->boot_params);
 
+#ifdef CONFIG_OF
 	/*
-	 * If we have the old style parameters, convert them to
-	 * a tag list.
+	 * Try to probe from the device tree, in which case we don't need
+	 * to use the other atags, and the command line is setup for us
 	 */
-	if (tags->hdr.tag != ATAG_CORE)
-		convert_to_tag_list(tags);
-	if (tags->hdr.tag != ATAG_CORE)
-		tags = (struct tag *)&init_tags;
+	mdesc = parse_devicetree(__machine_arch_type, __devtree_pointer);
+#endif
 
-	if (mdesc->fixup)
-		mdesc->fixup(mdesc, tags, &from, &meminfo);
+	/* No supported device tree, use machine-id detection instead */
+	if (!mdesc) {
+		mdesc = setup_machine(machine_arch_type);
 
-	if (tags->hdr.tag == ATAG_CORE) {
-		if (meminfo.nr_banks != 0)
-			squash_mem_tags(tags);
-		save_atags(tags);
-		parse_tags(tags);
+		if (!__atags_pointer && mdesc->boot_params)
+			tags = phys_to_virt(mdesc->boot_params);
+
+		/*
+		 * If we have the old style parameters, convert them to
+		 * a tag list.
+		 */
+		if (tags->hdr.tag != ATAG_CORE)
+			convert_to_tag_list(tags);
+		if (tags->hdr.tag != ATAG_CORE)
+			tags = (struct tag *)&init_tags;
+
+		if (mdesc->fixup)
+			mdesc->fixup(mdesc, tags, &from, &meminfo);
+
+		if (tags->hdr.tag == ATAG_CORE) {
+			if (meminfo.nr_banks != 0)
+				squash_mem_tags(tags);
+			save_atags(tags);
+			parse_tags(tags);
+		}
+
+		/* Copy discovered command line to boot_command_line
+		 * and cmd_line */
+		strlcpy(boot_command_line, from, COMMAND_LINE_SIZE);
+		strlcpy(cmd_line, boot_command_line, COMMAND_LINE_SIZE);
 	}
+
+	machine_name = mdesc->name;
+	if (mdesc->soft_reboot)
+		reboot_setup("s");
 
 	init_mm.start_code = (unsigned long) _text;
 	init_mm.end_code   = (unsigned long) _etext;
 	init_mm.end_data   = (unsigned long) _edata;
 	init_mm.brk	   = (unsigned long) _end;
 
-	memcpy(boot_command_line, from, COMMAND_LINE_SIZE);
-	boot_command_line[COMMAND_LINE_SIZE-1] = '\0';
-	parse_cmdline(cmdline_p, from);
+	/* Do early command line parse, using boot_command_line */
+	*cmdline_p = cmd_line;
+	parse_early_param();
+
 	paging_init(mdesc);
 	request_standard_resources(&meminfo, mdesc);
+
+	unflatten_device_tree();
 
 #ifdef CONFIG_SMP
 	smp_init_cpus();

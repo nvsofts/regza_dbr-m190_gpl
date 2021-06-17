@@ -21,11 +21,14 @@
 #include <linux/smp.h>
 #include <linux/smp_lock.h>
 #include <linux/ipc.h>
+#include <trace/ipc.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
 
 /* #define DEBUG_UNIMP_SYSCALL */
+
+DEFINE_TRACE(ipc_call);
 
 /* XXX Make this per-binary type, this way we can detect the type of
  * XXX a binary.  Every Sparc executable calls this very early on.
@@ -110,6 +113,8 @@ asmlinkage int sys_ipc (uint call, int first, int second, int third, void __user
 
 	version = call >> 16; /* hack for backward compatibility */
 	call &= 0xffff;
+
+	trace_ipc_call(call, first);
 
 	if (call <= SEMCTL)
 		switch (call) {

@@ -23,6 +23,7 @@
 #include <asm/setup.h>
 #include <asm/sizes.h>
 #include <asm/tlb.h>
+#include <asm/fixmap.h>
 
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
@@ -32,19 +33,40 @@
 static unsigned long phys_initrd_start __initdata = 0;
 static unsigned long phys_initrd_size __initdata = 0;
 
-static void __init early_initrd(char **p)
+static int __init early_initrd(char *p)
 {
 	unsigned long start, size;
+	char *endp;
 
-	start = memparse(*p, p);
-	if (**p == ',') {
-		size = memparse((*p) + 1, p);
+	start = memparse(p, &endp);
+	if (*endp == ',') {
+		size = memparse(endp + 1, NULL);
 
 		phys_initrd_start = start;
 		phys_initrd_size = size;
 	}
+	return 0;
 }
-__early_param("initrd=", early_initrd);
+early_param("initrd", early_initrd);
+
+#ifdef CONFIG_ARCH_TC9043X
+static unsigned long reservemem_start, reservemem_size;
+static int __init early_parse_reservemem(char *p)
+{
+	reservemem_size = memparse(p, &p);
+	if (*p == '@') {
+		unsigned long end;
+		reservemem_start = memparse(p + 1, &p) + PHYS_OFFSET;
+		end = reservemem_start + reservemem_size;
+		end = PFN_ALIGN(end);
+		reservemem_start &= PAGE_MASK;
+		reservemem_size = end - reservemem_start;
+	} else
+		reservemem_size = 0;
+	return 0;
+}
+early_param("reservemem", early_parse_reservemem);
+#endif/*CONFIG_ARCH_TC9043X*/
 
 static int __init parse_tag_initrd(const struct tag *tag)
 {
@@ -65,6 +87,29 @@ static int __init parse_tag_initrd2(const struct tag *tag)
 }
 
 __tagtable(ATAG_INITRD2, parse_tag_initrd2);
+
+#ifdef CONFIG_OF_FLATTREE
+
+#include <linux/of_fdt.h>
+#include <asm/devtree.h>
+static unsigned long phys_devtree_start __initdata;
+static unsigned long phys_devtree_size __initdata;
+
+#if defined(CONFIG_BLK_DEV_INITRD) || defined(CONFIG_ROOT_SQUASHFS_LINEAR)
+void __init early_init_dt_setup_initrd_arch(unsigned long start,
+					    unsigned long end)
+{
+	phys_initrd_start = start;
+	phys_initrd_size = end - start + 1;
+}
+#endif
+
+void __init bootmem_register_devtree(unsigned long start, unsigned long size)
+{
+	phys_devtree_start = start;
+	phys_devtree_size = size;
+}
+#endif /* CONFIG_OF_FLATTREE */
 
 /*
  * This keeps memory configuration data used by a couple memory
@@ -189,29 +234,33 @@ find_bootmap_pfn(int node, struct meminfo *mi, unsigned int bootmap_pages)
 	return bootmap_pfn;
 }
 
+static int __init check_region(struct meminfo *mi,
+			       unsigned long start, unsigned long size)
+{
+	unsigned long end = start + size - 1;
+	unsigned int i;
+
+	if (!size)
+		return -2;
+
+	/* Make sure that the region is within a valid bank of memory. */
+	for (i = 0; i < mi->nr_banks; i++) {
+		struct membank *bank = &mi->bank[i];
+		if (bank_phys_start(bank) <= start &&
+		    end <= bank_phys_end(bank))
+			return bank->node;
+	}
+
+	/* Region is outside of physical memory */
+	return -1;
+}
+
 static int __init check_initrd(struct meminfo *mi)
 {
 	int initrd_node = -2;
-#ifdef CONFIG_BLK_DEV_INITRD
-	unsigned long end = phys_initrd_start + phys_initrd_size;
 
-	/*
-	 * Make sure that the initrd is within a valid area of
-	 * memory.
-	 */
-	if (phys_initrd_size) {
-		unsigned int i;
-
-		initrd_node = -1;
-
-		for (i = 0; i < mi->nr_banks; i++) {
-			struct membank *bank = &mi->bank[i];
-			if (bank_phys_start(bank) <= phys_initrd_start &&
-			    end <= bank_phys_end(bank))
-				initrd_node = bank->node;
-		}
-	}
-
+#if defined(CONFIG_BLK_DEV_INITRD) || defined(CONFIG_ROOT_SQUASHFS_LINEAR)
+	initrd_node = check_region(mi, phys_initrd_start, phys_initrd_size);
 	if (initrd_node == -1) {
 		printk(KERN_ERR "INITRD: 0x%08lx+0x%08lx extends beyond "
 		       "physical memory - disabling initrd\n",
@@ -221,6 +270,25 @@ static int __init check_initrd(struct meminfo *mi)
 #endif
 
 	return initrd_node;
+}
+
+static int __init check_devtree(struct meminfo *mi)
+{
+	int node = -2;
+#ifdef CONFIG_OF_FLATTREE
+	if ((phys_devtree_start == 0) || (phys_devtree_size == 0))
+		return node;
+
+	node = check_region(mi, phys_devtree_start, phys_devtree_size);
+	if (node == -1) {
+		pr_err("DEVICETREE: 0x%08lx+0x%08lx extends beyond "
+		       "physical memory - disabling device tree\n",
+		       phys_devtree_start, phys_devtree_size);
+		phys_devtree_start = phys_devtree_size = 0;
+	}
+#endif
+
+	return node;
 }
 
 static inline void map_memory_bank(struct membank *bank)
@@ -284,7 +352,7 @@ static void __init bootmem_init_node(int node, struct meminfo *mi,
 
 static void __init bootmem_reserve_initrd(int node)
 {
-#ifdef CONFIG_BLK_DEV_INITRD
+#if defined(CONFIG_BLK_DEV_INITRD) || defined(CONFIG_ROOT_SQUASHFS_LINEAR)
 	pg_data_t *pgdat = NODE_DATA(node);
 	int res;
 
@@ -292,13 +360,49 @@ static void __init bootmem_reserve_initrd(int node)
 			     phys_initrd_size, BOOTMEM_EXCLUSIVE);
 
 	if (res == 0) {
+#ifdef CONFIG_ROOT_SQUASHFS_LINEAR
+		char *start_str;
+		pr_info("Linear fsimage at: 0x%lx (%lu bytes)\n",
+			__phys_to_virt(phys_initrd_start), phys_initrd_size);
+		start_str = strstr(cmd_line, "rootflags=");
+		if (!start_str ||
+		    (start_str != cmd_line && *(start_str - 1) != ' ')) {
+			/* no rootflags specified. */
+			char tmpstr[64];
+			sprintf(tmpstr, " rootflags=physaddr=0x%lx",
+				phys_initrd_start);
+			if (strlen(cmd_line) + strlen(tmpstr) <
+			    sizeof(cmd_line))
+				strcat(cmd_line, tmpstr);
+			else
+				pr_err("cmd_line overflow\n");
+		}
+#else
 		initrd_start = __phys_to_virt(phys_initrd_start);
 		initrd_end = initrd_start + phys_initrd_size;
+#endif
 	} else {
 		printk(KERN_ERR
 			"INITRD: 0x%08lx+0x%08lx overlaps in-use "
 			"memory region - disabling initrd\n",
 			phys_initrd_start, phys_initrd_size);
+	}
+#endif
+}
+
+static void __init bootmem_reserve_devtree(int node)
+{
+#ifdef CONFIG_OF_FLATTREE
+	pg_data_t *pgdat = NODE_DATA(node);
+	int res;
+
+	res = reserve_bootmem_node(pgdat, phys_devtree_start,
+				   phys_devtree_size, BOOTMEM_EXCLUSIVE);
+	if (res) {
+		pr_err("DEVICETREE: 0x%08lx+0x%08lx overlaps in-use "
+		       "memory region - disabling device tree\n",
+			phys_devtree_start, phys_devtree_size);
+		phys_devtree_start = phys_devtree_size = 0;
 	}
 #endif
 }
@@ -395,7 +499,7 @@ void __init bootmem_init(void)
 {
 	struct meminfo *mi = &meminfo;
 	unsigned long min, max_low, max_high;
-	int node, initrd_node;
+	int node, initrd_node, devtree_node;
 
 	sort(&mi->bank, mi->nr_banks, sizeof(mi->bank[0]), meminfo_cmp, NULL);
 
@@ -403,6 +507,7 @@ void __init bootmem_init(void)
 	 * Locate which node contains the ramdisk image, if any.
 	 */
 	initrd_node = check_initrd(mi);
+	devtree_node = check_devtree(mi);
 
 	max_low = max_high = 0;
 
@@ -435,10 +540,13 @@ void __init bootmem_init(void)
 			reserve_node_zero(NODE_DATA(node));
 
 		/*
-		 * If the initrd is in this node, reserve its memory.
+		 * If the initrd is in this node, reserve its memory. Do the
+		 * same for the device tree
 		 */
 		if (node == initrd_node)
 			bootmem_reserve_initrd(node);
+		if (node == devtree_node)
+			bootmem_reserve_devtree(node);
 
 		/*
 		 * Sparsemem tries to allocate bootmem in memory_present(),
@@ -472,6 +580,15 @@ void __init bootmem_init(void)
 	 */
 	max_low_pfn = max_low - PHYS_PFN_OFFSET;
 	max_pfn = max_high - PHYS_PFN_OFFSET;
+
+#ifdef CONFIG_ARCH_TC9043X
+	if (reservemem_start) {
+		reserve_bootmem(reservemem_start, reservemem_size,
+				BOOTMEM_DEFAULT);
+		printk(KERN_INFO "Reservemem at: 0x%lx (%lu bytes)\n",
+		       reservemem_start, reservemem_size);
+	}
+#endif/*CONFIG_ARCH_TC9043X*/
 }
 
 static inline int free_area(unsigned long pfn, unsigned long end, char *s)
@@ -560,7 +677,7 @@ static void __init free_unused_memmap_node(int node, struct meminfo *mi)
  */
 void __init mem_init(void)
 {
-	unsigned int codesize, datasize, initsize;
+	unsigned long reserved_pages, free_pages;
 	int i, node;
 
 #ifndef CONFIG_DISCONTIGMEM
@@ -596,6 +713,33 @@ void __init mem_init(void)
 	totalram_pages += totalhigh_pages;
 #endif
 
+	reserved_pages = free_pages = 0;
+
+	for_each_online_node(node) {
+		pg_data_t *n = NODE_DATA(node);
+		struct page *map = pgdat_page_nr(n, 0) - n->node_start_pfn;
+
+		for_each_nodebank(i, &meminfo, node) {
+			struct membank *bank = &meminfo.bank[i];
+			unsigned int pfn1, pfn2;
+			struct page *page, *end;
+
+			pfn1 = bank_pfn_start(bank);
+			pfn2 = bank_pfn_end(bank);
+
+			page = map + pfn1;
+			end  = map + pfn2;
+
+			do {
+				if (PageReserved(page))
+					reserved_pages++;
+				else if (!page_count(page))
+					free_pages++;
+				page++;
+			} while (page < end);
+		}
+	}
+
 	/*
 	 * Since our memory may not be contiguous, calculate the
 	 * real number of pages we have in this system
@@ -608,15 +752,47 @@ void __init mem_init(void)
 	}
 	printk(" = %luMB total\n", num_physpages >> (20 - PAGE_SHIFT));
 
-	codesize = _etext - _text;
-	datasize = _end - _data;
-	initsize = __init_end - __init_begin;
+	printk(KERN_NOTICE "Memory: %luk/%luk available, %luk reserved, %luK highmem\n",
+		nr_free_pages() << (PAGE_SHIFT-10),
+		free_pages << (PAGE_SHIFT-10),
+		reserved_pages << (PAGE_SHIFT-10),
+		totalhigh_pages << (PAGE_SHIFT-10));
 
-	printk(KERN_NOTICE "Memory: %luKB available (%dK code, "
-		"%dK data, %dK init, %luK highmem)\n",
-		nr_free_pages() << (PAGE_SHIFT-10), codesize >> 10,
-		datasize >> 10, initsize >> 10,
-		(unsigned long) (totalhigh_pages << (PAGE_SHIFT-10)));
+#define MLK(b, t) b, t, ((t) - (b)) >> 10
+#define MLM(b, t) b, t, ((t) - (b)) >> 20
+#define MLK_ROUNDUP(b, t) b, t, DIV_ROUND_UP(((t) - (b)), SZ_1K)
+
+	printk(KERN_NOTICE "Virtual kernel memory layout:\n"
+			"    vector  : 0x%08lx - 0x%08lx   (%4ld kB)\n"
+			"    fixmap  : 0x%08lx - 0x%08lx   (%4ld kB)\n"
+			"    vmalloc : 0x%08lx - 0x%08lx   (%4ld MB)\n"
+			"    lowmem  : 0x%08lx - 0x%08lx   (%4ld MB)\n"
+#ifdef CONFIG_HIGHMEM
+			"    pkmap   : 0x%08lx - 0x%08lx   (%4ld MB)\n"
+#endif
+			"    modules : 0x%08lx - 0x%08lx   (%4ld MB)\n"
+			"      .init : 0x%p" " - 0x%p" "   (%4d kB)\n"
+			"      .text : 0x%p" " - 0x%p" "   (%4d kB)\n"
+			"      .data : 0x%p" " - 0x%p" "   (%4d kB)\n",
+
+			MLK(UL(CONFIG_VECTORS_BASE), UL(CONFIG_VECTORS_BASE) +
+				(PAGE_SIZE)),
+			MLK(FIXADDR_START, FIXADDR_TOP),
+			MLM(VMALLOC_START, (unsigned long)VMALLOC_END),
+			MLM(PAGE_OFFSET, (unsigned long)high_memory),
+#ifdef CONFIG_HIGHMEM
+			MLM(PKMAP_BASE, (PKMAP_BASE) + (LAST_PKMAP) *
+				(PAGE_SIZE)),
+#endif
+			MLM(MODULES_VADDR, MODULES_END),
+
+			MLK_ROUNDUP(__init_begin, __init_end),
+			MLK_ROUNDUP(_text, _etext),
+			MLK_ROUNDUP(_data, _edata));
+
+#undef MLK
+#undef MLM
+#undef MLK_ROUNDUP
 
 	if (PAGE_SIZE >= 16384 && num_physpages <= 128) {
 		extern int sysctl_overcommit_memory;

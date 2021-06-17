@@ -403,7 +403,12 @@ static int nand_check_wp(struct mtd_info *mtd)
 	struct nand_chip *chip = mtd->priv;
 	/* Check the WP bit */
 	chip->cmdfunc(mtd, NAND_CMD_STATUS, -1, -1);
+#if defined(CONFIG_MTD_NAND_TC90431) || \
+	defined(CONFIG_MTD_NAND_TC90431_MODULE)
+	return (chip->waitfunc(mtd, chip) & NAND_STATUS_WP) ? 0 : 1;
+#else
 	return (chip->read_byte(mtd) & NAND_STATUS_WP) ? 0 : 1;
+#endif
 }
 
 /**
@@ -745,8 +750,14 @@ static int nand_wait(struct mtd_info *mtd, struct nand_chip *chip)
 			if (chip->dev_ready(mtd))
 				break;
 		} else {
+#if defined(CONFIG_MTD_NAND_TC90431) || \
+	defined(CONFIG_MTD_NAND_TC90431_MODULE)
+			if (chip->waitfunc(mtd, chip) & NAND_STATUS_READY)
+				break;
+#else
 			if (chip->read_byte(mtd) & NAND_STATUS_READY)
 				break;
+#endif
 		}
 		cond_resched();
 	}
@@ -2237,6 +2248,9 @@ int nand_erase_nand(struct mtd_info *mtd, struct erase_info *instr,
 		/*
 		 * heck if we have a bad block, we do not erase bad blocks !
 		 */
+#ifdef CONFIG_MTD_CHAR_MEMSETFORCEERASE
+		if ( !mtd->flag_force_erase_badblock ) {
+#endif
 		if (nand_block_checkbad(mtd, ((loff_t) page) <<
 					chip->page_shift, 0, allowbbt)) {
 			printk(KERN_WARNING "%s: attempt to erase a bad block "
@@ -2244,6 +2258,9 @@ int nand_erase_nand(struct mtd_info *mtd, struct erase_info *instr,
 			instr->state = MTD_ERASE_FAILED;
 			goto erase_exit;
 		}
+#ifdef CONFIG_MTD_CHAR_MEMSETFORCEERASE
+		}
+#endif
 
 		/*
 		 * Invalidate the page cache, if we erase the block which
@@ -2391,6 +2408,76 @@ static int nand_block_markbad(struct mtd_info *mtd, loff_t ofs)
 }
 
 /**
+ * nand_errstat_get - [MTD Interface] Get additional error status checks.
+ * @mtd:	MTD device structure
+ * @state:      Chip status
+ * @esc:        Errstat command(s)
+ * @count:      Number of Errstat command(s)
+ */
+static int nand_errstat_get(struct mtd_info *mtd, int state,
+			    struct nand_errstat_cmd **esc, size_t *count)
+{
+	struct nand_chip *chip = mtd->priv;
+	struct nand_errstat_cmd *c;
+
+	if ((state < 0) || (FL_STATE_MAX <= state) || (count == NULL))
+		return -EINVAL;
+
+	if (chip->errstat_cmd[state] == NULL) {
+		*count = 0;
+		return 0;
+	}
+
+	for (c = chip->errstat_cmd[state]; c->maf_id != -1; c++)
+		;
+	*count = c - chip->errstat_cmd[state];
+
+	if (esc != NULL)
+		*esc = chip->errstat_cmd[state];
+
+	return 0;
+}
+
+/**
+ * nand_errstat_set - [MTD Interface] Set additional error status checks.
+ * @mtd:	MTD device structure
+ * @state:      Chip status
+ * @esc:        Errstat command(s)
+ * @count:      Number of Errstat command(s)
+ */
+static int nand_errstat_set(struct mtd_info *mtd, int state,
+			    struct nand_errstat_cmd *esc, size_t count)
+{
+	struct nand_chip *chip = mtd->priv;
+	int i;
+
+	if (state == -1) {
+		for (i = 0; i < FL_STATE_MAX; i++) {
+			if (chip->errstat_cmd[i] != NULL) {
+				kfree(chip->errstat_cmd[i]);
+				chip->errstat_cmd[i] = NULL;
+			}
+		}
+		return 0;
+	}
+
+	if ((state < 0) || (FL_STATE_MAX <= state))
+		return -EINVAL;
+
+	if (chip->errstat_cmd[state] != NULL) {
+		kfree(chip->errstat_cmd[state]);
+		chip->errstat_cmd[state] = NULL;
+	}
+
+	if ((count == 0) && (esc == NULL))
+		return 0;
+
+	chip->errstat_cmd[state] = esc;
+
+	return 0;
+}
+
+/**
  * nand_suspend - [MTD Interface] Suspend the NAND flash
  * @mtd:	MTD device structure
  */
@@ -2486,6 +2573,8 @@ static struct nand_flash_dev *nand_get_flash_type(struct mtd_info *mtd,
 	/* Read manufacturer and device IDs */
 	*maf_id = chip->read_byte(mtd);
 	dev_id = chip->read_byte(mtd);
+	chip->man_id = *maf_id;
+	chip->dev_id = dev_id;
 
 	/* Try again to make sure, as some systems the bus-hold or other
 	 * interface concerns can cause random data which looks like a
@@ -2589,7 +2678,14 @@ static struct nand_flash_dev *nand_get_flash_type(struct mtd_info *mtd,
 		NAND_LARGE_BADBLOCK_POS : NAND_SMALL_BADBLOCK_POS;
 
 	/* Get chip options, preserve non chip based options */
+#if defined(CONFIG_MTD_NAND_TC90431) || \
+defined(CONFIG_MTD_NAND_TC90431_MODULE) || \
+defined(CONFIG_MTD_NAND_TC90431_HAMMING) || \
+defined(CONFIG_MTD_NAND_TC90431_HAMMING_MODULE)
+	chip->options &= NAND_CHIPOPTIONS_MSK;
+#else
 	chip->options &= ~NAND_CHIPOPTIONS_MSK;
+#endif
 	chip->options |= type->options & NAND_CHIPOPTIONS_MSK;
 
 	/*
@@ -2886,6 +2982,8 @@ int nand_scan_tail(struct mtd_info *mtd)
 	mtd->resume = nand_resume;
 	mtd->block_isbad = nand_block_isbad;
 	mtd->block_markbad = nand_block_markbad;
+	mtd->errstat_get = nand_errstat_get;
+	mtd->errstat_set = nand_errstat_set;
 
 	/* propagate ecc.layout to mtd_info */
 	mtd->ecclayout = chip->ecc.layout;

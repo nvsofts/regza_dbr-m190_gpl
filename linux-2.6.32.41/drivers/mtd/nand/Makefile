@@ -5,6 +5,8 @@
 obj-$(CONFIG_MTD_NAND)			+= nand.o nand_ecc.o
 obj-$(CONFIG_MTD_NAND_IDS)		+= nand_ids.o
 
+obj-$(CONFIG_MTD_NAND_TC90431)		+= tc90431_nand.o
+obj-$(CONFIG_MTD_NAND_TC90431_HAMMING)	+= tc90431_ham_nand.o
 obj-$(CONFIG_MTD_NAND_CAFE)		+= cafe_nand.o
 obj-$(CONFIG_MTD_NAND_SPIA)		+= spia.o
 obj-$(CONFIG_MTD_NAND_AMS_DELTA)	+= ams-delta.o

@@ -35,6 +35,8 @@ OPTIONS
 --power-only::
         Only output the CPU power section of the diagram
 
+--symfs=<directory>::
+        Look for files with symbols relative to this directory.
 
 SEE ALSO
 --------

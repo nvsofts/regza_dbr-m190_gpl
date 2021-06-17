@@ -41,6 +41,7 @@ ifeq ($(CONFIG_X86_32),y)
 
         # temporary until string.h is fixed
         KBUILD_CFLAGS += -ffreestanding
+        export USE_IMMEDIATE := $(CONFIG_IMMEDIATE)
 else
         BITS := 64
         UTS_MACHINE := x86_64
@@ -70,6 +71,10 @@ else
         # this works around some issues with generating unwind tables in older gccs
         # newer gccs do it by default
         KBUILD_CFLAGS += -maccumulate-outgoing-args
+
+        # x86_64 gcc 3.x has problems with passing symbol+offset in
+        # asm "i" constraint.
+        export USE_IMMEDIATE := $(call cc-ifversion, -ge, 0400, $(CONFIG_IMMEDIATE))
 endif
 
 ifdef CONFIG_CC_STACKPROTECTOR

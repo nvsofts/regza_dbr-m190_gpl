@@ -121,7 +121,10 @@ mempool_t *sd_cdb_pool;
 
 static const char *sd_cache_types[] = {
 	"write through", "none", "write back",
-	"write back, no read (daft)"
+	"write back, no read (daft)",
+	"write through force", "none force",
+	"write back force",
+	"write back, no read (daft) force"
 };
 
 static ssize_t
@@ -155,6 +158,22 @@ sd_store_cache_type(struct device *dev, struct device_attribute *attr,
 		return -EINVAL;
 	rcd = ct & 0x01 ? 1 : 0;
 	wce = ct & 0x02 ? 1 : 0;
+
+	if (ct & 0x4) {
+		sdkp->WCE = wce;
+		sdkp->RCD = rcd;
+		sd_printk(KERN_NOTICE, sdkp,
+			"Write cache: %s Read cache: %s\n",
+			sdkp->WCE ? "enabled" : "disabled",
+			sdkp->RCD ? "disabled" : "enabled");
+
+		sdkp->wb_force = 1;
+		revalidate_disk(sdkp->disk);
+		return count;
+	} else {
+		sdkp->wb_force = 0;
+	}
+
 	if (scsi_mode_sense(sdp, 0x08, 8, buffer, sizeof(buffer), SD_TIMEOUT,
 			    SD_MAX_RETRIES, &data, NULL))
 		return -EINVAL;
@@ -214,7 +233,7 @@ sd_show_cache_type(struct device *dev, struct device_attribute *attr,
 		   char *buf)
 {
 	struct scsi_disk *sdkp = to_scsi_disk(dev);
-	int ct = sdkp->RCD + 2*sdkp->WCE;
+	int ct = sdkp->RCD + 2*sdkp->WCE + 4*sdkp->wb_force;
 
 	return snprintf(buf, 40, "%s\n", sd_cache_types[ct]);
 }
@@ -981,6 +1000,7 @@ static void sd_rescan(struct device *dev)
 	struct scsi_disk *sdkp = scsi_disk_get_from_dev(dev);
 
 	if (sdkp) {
+		sdkp->media_present = 1;
 		revalidate_disk(sdkp->disk);
 		scsi_disk_put(sdkp);
 	}
@@ -1120,7 +1140,9 @@ static int sd_done(struct scsi_cmnd *SCpnt)
 		goto out;
 
 	switch (sshdr.sense_key) {
+#ifndef CONFIG_SCSI_REMOVED_HANDLING
 	case HARDWARE_ERROR:
+#endif
 	case MEDIUM_ERROR:
 		good_bytes = sd_completed_bytes(SCpnt);
 		break;
@@ -1150,6 +1172,16 @@ static int sd_done(struct scsi_cmnd *SCpnt)
 			good_bytes = sd_completed_bytes(SCpnt);
 		}
 		break;
+#ifdef CONFIG_SCSI_REMOVED_HANDLING
+	case HARDWARE_ERROR:
+	case NOT_READY: /* Device is removed. */
+		if (SCpnt->device->removable) {
+			struct scsi_disk *sdkp =
+				dev_get_drvdata(&SCpnt->device->sdev_gendev);
+			set_media_not_present(sdkp);
+		}
+		break;
+#endif
 	default:
 		break;
 	}
@@ -1967,7 +1999,8 @@ static int sd_revalidate_disk(struct gendisk *disk)
 		}
 
 		sd_read_write_protect_flag(sdkp, buffer);
-		sd_read_cache_type(sdkp, buffer);
+		if (!sdkp->wb_force)
+			sd_read_cache_type(sdkp, buffer);
 		sd_read_app_tag_own(sdkp, buffer);
 	}
 
@@ -2051,6 +2084,13 @@ static void sd_probe_async(void *data, async_cookie_t cookie)
 	u32 index;
 	struct device *dev;
 
+#ifdef CONFIG_BLK_DEV_SD_RTSCHED
+	struct sched_param param = {
+		.sched_priority = CONFIG_BLK_DEV_SD_RTSCHED_SCAN_PRIO
+	};
+	sched_setscheduler(current, SCHED_FIFO, &param);
+#endif
+
 	sdp = sdkp->device;
 	gd = sdkp->disk;
 	index = sdkp->index;
@@ -2073,6 +2113,7 @@ static void sd_probe_async(void *data, async_cookie_t cookie)
 	sdkp->RCD = 0;
 	sdkp->ATO = 0;
 	sdkp->first_scan = 1;
+	sdkp->wb_force = 0;
 
 	sd_revalidate_disk(gd);
 

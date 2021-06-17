@@ -417,6 +417,66 @@ static struct {
 	{0, NULL},
 };
  
+#ifdef CONFIG_NOMBR_PARTITION
+#include <linux/msdos_fs.h>
+int check_fat(struct block_device *bdev, unsigned char* data)
+{
+	int bpb_RootEntCnt,rootDirSectors,fatsz,bpb_RsvdSecCnt,dataSec,countOfClusters;
+	int totSec;
+	int hard_blksize = bdev_logical_block_size(bdev);
+	struct fat_boot_sector *b = (struct fat_boot_sector *) data;
+	int logical_sector_size =
+		CF_LE_W(get_unaligned((unsigned short *) &b->sector_size));
+	if (!logical_sector_size
+	    || (logical_sector_size & (logical_sector_size - 1))) {
+		printk("FAT: bogus logical sector size %d\n",
+		       logical_sector_size);
+		goto out_invalid;
+	}
+
+	if (!b->sec_per_clus
+	    || (b->sec_per_clus & (b->sec_per_clus - 1))) {
+		printk("FAT: bogus cluster size %d\n", b->sec_per_clus);
+		goto out_invalid;
+	}
+
+	if (logical_sector_size < hard_blksize) {
+		printk("FAT: logical sector size too small for device"
+		       " (logical sector size = %d)\n", logical_sector_size);
+		goto out_invalid;
+	}
+
+	totSec = CF_LE_W(get_unaligned((unsigned short *) &b->sectors));
+	if( totSec == 0 ){
+		totSec = CF_LE_L(b->total_sect);
+	}
+	bpb_RootEntCnt = CF_LE_W(get_unaligned((unsigned short *) &b->dir_entries));
+	rootDirSectors = ((bpb_RootEntCnt * 32) + (logical_sector_size-1)) / logical_sector_size;
+	fatsz = CF_LE_W(b->fat_length);
+	if(fatsz==0){
+		fatsz = CF_LE_L(b->fat32_length);
+	}
+	bpb_RsvdSecCnt = CF_LE_W(b->reserved);
+	dataSec = totSec - (bpb_RsvdSecCnt + (b->fats * fatsz) + rootDirSectors);
+	countOfClusters = dataSec / b->sec_per_clus;
+#if 0
+	printk("bpb_RootEntCnt=%d\n",bpb_RootEntCnt);
+	printk("rootDirSectors=%d\n",rootDirSectors);
+	printk("fatsz=%d\n",fatsz);
+	printk("bpb_RsvdSecCnt=%d\n",bpb_RsvdSecCnt);
+	printk("dataSec=%d\n",dataSec);
+	printk("countOfClusters=%d\n",countOfClusters);
+#endif
+	if( countOfClusters == 0 ){
+		printk("FAT: FileFormat is illegal\n");
+		goto out_invalid;
+	}
+	return totSec;
+ out_invalid:
+	return 0;
+}
+#endif
+
 int msdos_partition(struct parsed_partitions *state, struct block_device *bdev)
 {
 	sector_t sector_size = bdev_logical_block_size(bdev) / 512;
@@ -440,6 +500,16 @@ int msdos_partition(struct parsed_partitions *state, struct block_device *bdev)
 		return 0;
 	}
 
+#ifdef CONFIG_NOMBR_PARTITION
+	/* FAT exist here if no MBR partition */
+	if(data[0]==0xe9 || data[0]==0xeb){
+		int totSec = check_fat(bdev,data);
+		if(totSec){
+			put_partition(state, 1, 0, totSec);
+			return 1;
+		}
+	}
+#endif
 	/*
 	 * Now that the 55aa signature is present, this is probably
 	 * either the boot sector of a FAT filesystem or a DOS-type

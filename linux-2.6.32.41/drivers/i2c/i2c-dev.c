@@ -38,6 +38,10 @@
 #include <linux/jiffies.h>
 #include <asm/uaccess.h>
 
+#ifdef CONFIG_I2C_TC90431
+#include <linux/i2c/tc90431.h>
+#endif
+
 static struct i2c_driver i2cdev_driver;
 
 /*
@@ -240,6 +244,17 @@ static noinline int i2cdev_ioctl_rdrw(struct i2c_client *client,
 
 	res = 0;
 	for (i = 0; i < rdwr_arg.nmsgs; i++) {
+#ifdef CONFIG_I2C_TC90431
+		__u16 wr_len = rdwr_pa[i].len;
+
+		if (rdwr_pa[i].flags & I2C_M_RD) {
+			if (rdwr_pa[i].flags & I2C_M_SUBADDR1)
+				wr_len = 1;
+			else if (rdwr_pa[i].flags & I2C_M_SUBADDR2)
+				wr_len = 2;
+		}
+#endif
+
 		/* Limit the size of the message to a sane amount;
 		 * and don't let length change either. */
 		if ((rdwr_pa[i].len > 8192) ||
@@ -248,13 +263,22 @@ static noinline int i2cdev_ioctl_rdrw(struct i2c_client *client,
 			break;
 		}
 		data_ptrs[i] = (u8 __user *)rdwr_pa[i].buf;
+#ifdef CONFIG_I2C_TC90431
+		rdwr_pa[i].buf = kmalloc(max(wr_len, rdwr_pa[i].len),
+					 GFP_KERNEL);
+#else
 		rdwr_pa[i].buf = kmalloc(rdwr_pa[i].len, GFP_KERNEL);
+#endif
 		if (rdwr_pa[i].buf == NULL) {
 			res = -ENOMEM;
 			break;
 		}
 		if (copy_from_user(rdwr_pa[i].buf, data_ptrs[i],
+#ifdef CONFIG_I2C_TC90431
+				   wr_len)) {
+#else
 				   rdwr_pa[i].len)) {
+#endif
 				++i; /* Needs to be kfreed too */
 				res = -EFAULT;
 			break;
@@ -269,7 +293,18 @@ static noinline int i2cdev_ioctl_rdrw(struct i2c_client *client,
 		return res;
 	}
 
+#ifdef CONFIG_I2C_TC90431
+	mutex_lock_nested(&client->adapter->bus_lock, client->adapter->level);
+	i2c_set_client_privatedata_to_adapter(client);
+#endif
+
 	res = i2c_transfer(client->adapter, rdwr_pa, rdwr_arg.nmsgs);
+
+#ifdef CONFIG_I2C_TC90431
+	i2c_get_client_privatedata_from_adapter(client);
+	mutex_unlock(&client->adapter->bus_lock);
+#endif
+
 	while (i-- > 0) {
 		if (res >= 0 && (rdwr_pa[i].flags & I2C_M_RD)) {
 			if (copy_to_user(data_ptrs[i], rdwr_pa[i].buf,
@@ -283,6 +318,7 @@ static noinline int i2cdev_ioctl_rdrw(struct i2c_client *client,
 	return res;
 }
 
+#ifndef CONFIG_I2C_TC90431
 static noinline int i2cdev_ioctl_smbus(struct i2c_client *client,
 		unsigned long arg)
 {
@@ -367,6 +403,7 @@ static noinline int i2cdev_ioctl_smbus(struct i2c_client *client,
 	}
 	return res;
 }
+#endif
 
 static long i2cdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
@@ -397,6 +434,7 @@ static long i2cdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		/* REVISIT: address could become busy later */
 		client->addr = arg;
 		return 0;
+#ifndef CONFIG_I2C_TC90431
 	case I2C_TENBIT:
 		if (arg)
 			client->flags |= I2C_M_TEN;
@@ -409,6 +447,7 @@ static long i2cdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		else
 			client->flags &= ~I2C_CLIENT_PEC;
 		return 0;
+#endif
 	case I2C_FUNCS:
 		funcs = i2c_get_functionality(client->adapter);
 		return put_user(funcs, (unsigned long __user *)arg);
@@ -416,18 +455,43 @@ static long i2cdev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	case I2C_RDWR:
 		return i2cdev_ioctl_rdrw(client, arg);
 
+#ifndef CONFIG_I2C_TC90431
 	case I2C_SMBUS:
 		return i2cdev_ioctl_smbus(client, arg);
 
 	case I2C_RETRIES:
 		client->adapter->retries = arg;
 		break;
+#endif
 	case I2C_TIMEOUT:
 		/* For historical reasons, user-space sets the timeout
 		 * value in units of 10 ms.
 		 */
+#ifdef CONFIG_I2C_TC90431
+		client->adapter->timeout = arg;
+#else
 		client->adapter->timeout = msecs_to_jiffies(arg * 10);
+#endif
 		break;
+#ifdef CONFIG_I2C_TC90431
+	case I2C_SLAVE_TIMEOUT:
+		i2c_set_client_timeout(client->data, arg);
+		break;
+	case I2C_ERROR:
+		return put_user(i2c_get_error(client->data),
+				(unsigned int __user *)arg);
+		break;
+	case I2C_CLOCK:
+		return i2c_set_clock_legacy(client->adapter, arg);
+	case I2C_SET_CLOCK:
+		return i2c_set_clock(client->adapter, arg);
+	case I2C_GET_CLOCK:
+		return i2c_get_clock(client->adapter);
+	case I2C_SET_AUTO_DEVRESET:
+		return i2c_set_auto_devreset(client->adapter, arg);
+	case I2C_GET_AUTO_DEVRESET:
+		return i2c_get_auto_devreset(client->adapter);
+#endif
 	default:
 		/* NOTE:  returning a fault code here could cause trouble
 		 * in buggy userspace code.  Some old kernel bugs returned
@@ -460,6 +524,12 @@ static int i2cdev_open(struct inode *inode, struct file *file)
 		goto out;
 	}
 
+#ifdef CONFIG_I2C_TC90431
+	ret = i2c_initialize_controller(adap);
+	if (ret < 0)
+		goto out;
+#endif
+
 	/* This creates an anonymous i2c_client, which may later be
 	 * pointed to some address using I2C_SLAVE or I2C_SLAVE_FORCE.
 	 *
@@ -476,6 +546,12 @@ static int i2cdev_open(struct inode *inode, struct file *file)
 	snprintf(client->name, I2C_NAME_SIZE, "i2c-dev %d", adap->nr);
 	client->driver = &i2cdev_driver;
 
+#ifdef CONFIG_I2C_TC90431
+	ret = i2c_init_client_privatedata(client);
+	if (ret < 0)
+		goto out;
+#endif
+
 	client->adapter = adap;
 	file->private_data = client;
 
@@ -489,6 +565,9 @@ static int i2cdev_release(struct inode *inode, struct file *file)
 	struct i2c_client *client = file->private_data;
 
 	i2c_put_adapter(client->adapter);
+#ifdef CONFIG_I2C_TC90431
+	i2c_exit_client_privatedata(client);
+#endif
 	kfree(client);
 	file->private_data = NULL;
 

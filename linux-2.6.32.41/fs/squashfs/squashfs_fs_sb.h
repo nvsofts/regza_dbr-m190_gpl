@@ -72,5 +72,9 @@ struct squashfs_sb_info {
 	unsigned short		block_log;
 	long long		bytes_used;
 	unsigned int		inodes;
+#ifdef CONFIG_SQUASHFS_LINEAR
+	unsigned long		linear_phys_addr;
+	void __iomem		*linear_virt_addr;
+#endif /* CONFIG_SQUASHFS_LINEAR */
 };
 #endif

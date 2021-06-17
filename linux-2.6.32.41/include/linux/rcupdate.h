@@ -49,6 +49,9 @@
 struct rcu_head {
 	struct rcu_head *next;
 	void (*func)(struct rcu_head *head);
+#ifdef CONFIG_DEBUG_RCU_HEAD
+	struct rcu_head *debug;
+#endif
 };
 
 /* Exported common interfaces */
@@ -77,11 +80,19 @@ extern int rcu_scheduler_active;
 #error "Unknown RCU implementation specified to kernel configuration"
 #endif
 
+#ifdef CONFIG_DEBUG_RCU_HEAD
+#define RCU_HEAD_INIT 	{ .next = NULL, .func = NULL, .debug = NULL }
+#define RCU_HEAD(head) struct rcu_head head = RCU_HEAD_INIT
+#define INIT_RCU_HEAD(ptr) do { \
+       (ptr)->next = NULL; (ptr)->func = NULL; (ptr)->debug = NULL; \
+} while (0)
+#else
 #define RCU_HEAD_INIT	{ .next = NULL, .func = NULL }
 #define RCU_HEAD(head) struct rcu_head head = RCU_HEAD_INIT
 #define INIT_RCU_HEAD(ptr) do { \
        (ptr)->next = NULL; (ptr)->func = NULL; \
 } while (0)
+#endif
 
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
 extern struct lockdep_map rcu_lock_map;

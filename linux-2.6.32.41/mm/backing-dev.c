@@ -267,6 +267,11 @@ static void bdi_task_init(struct backing_dev_info *bdi,
 			  struct bdi_writeback *wb)
 {
 	struct task_struct *tsk = current;
+#ifdef CONFIG_PDFLUSH_RTSCHED
+	struct sched_param param = {
+		.sched_priority = CONFIG_PDFLUSH_RTSCHED_PRIO
+	};
+#endif
 
 	spin_lock(&bdi->wb_lock);
 	list_add_tail_rcu(&wb->list, &bdi->wb_list);
@@ -278,7 +283,11 @@ static void bdi_task_init(struct backing_dev_info *bdi,
 	/*
 	 * Our parent may run at a different priority, just set us to normal
 	 */
+#ifdef CONFIG_PDFLUSH_RTSCHED
+	sched_setscheduler(tsk, SCHED_FIFO, &param);
+#else
 	set_user_nice(tsk, 0);
+#endif
 }
 
 static int bdi_start_fn(void *ptr)
@@ -349,7 +358,14 @@ static void bdi_flush_io(struct backing_dev_info *bdi)
  */
 static int bdi_sync_supers(void *unused)
 {
+#ifdef CONFIG_PDFLUSH_RTSCHED
+	struct sched_param param = {
+		.sched_priority = CONFIG_PDFLUSH_RTSCHED_PRIO
+	};
+	sched_setscheduler(current, SCHED_FIFO, &param);
+#else
 	set_user_nice(current, 0);
+#endif
 
 	while (!kthread_should_stop()) {
 		set_current_state(TASK_INTERRUPTIBLE);

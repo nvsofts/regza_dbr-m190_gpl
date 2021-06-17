@@ -85,6 +85,7 @@ int max_threads;		/* tunable limit on nr_threads */
 DEFINE_PER_CPU(unsigned long, process_counts) = 0;
 
 __cacheline_aligned DEFINE_RWLOCK(tasklist_lock);  /* outer */
+EXPORT_SYMBOL(tasklist_lock);
 
 int nr_processes(void)
 {
@@ -241,6 +242,7 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
  	err = arch_dup_task_struct(tsk, orig);
 	if (err)
 		goto out;
+	netcpurate_task_init(tsk);
 
 	tsk->stack = ti;
 
@@ -1062,6 +1064,7 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 	INIT_LIST_HEAD(&p->children);
 	INIT_LIST_HEAD(&p->sibling);
 	rcu_copy_process(p);
+	INIT_RCU_HEAD(&p->rcu);
 	p->vfork_done = NULL;
 	spin_lock_init(&p->alloc_lock);
 
@@ -1121,6 +1124,16 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 	p->lockdep_depth = 0; /* no locks held yet */
 	p->curr_chain_key = 0;
 	p->lockdep_recursion = 0;
+#endif
+#ifdef CONFIG_NETCPURATE
+	p->cpu.stime = p->cpu.utime = 0;
+	p->cpu.ntime = 0;
+	p->cpu.nnum = -1;
+
+	p->cpu.astime = 0;
+	p->cpu.asflag = 0;
+	p->cpu.ltime_max = p->cpu.ltime_min = p->cpu.ltime_sum = 0;
+	p->cpu.lnum = 0;
 #endif
 
 #ifdef CONFIG_DEBUG_MUTEXES
@@ -1232,6 +1245,15 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 
 	/* Need tasklist lock for parent etc handling! */
 	write_lock_irq(&tasklist_lock);
+
+	/*
+	 * The state of the parent's TIF_KTRACE flag may have changed
+	 * since it was copied in dup_task_struct() so we re-copy it here.
+	 */
+	if (test_thread_flag(TIF_KERNEL_TRACE))
+		set_tsk_thread_flag(p, TIF_KERNEL_TRACE);
+	else
+		clear_tsk_thread_flag(p, TIF_KERNEL_TRACE);
 
 	/* CLONE_PARENT re-uses the old parent */
 	if (clone_flags & (CLONE_PARENT|CLONE_THREAD)) {

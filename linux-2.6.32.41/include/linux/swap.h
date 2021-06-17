@@ -352,6 +352,8 @@ static inline void mem_cgroup_uncharge_swap(swp_entry_t ent)
 }
 #endif
 
+extern void ltt_dump_swap_files(void *call_data);
+
 #else /* CONFIG_SWAP */
 
 #define nr_swap_pages				0L
@@ -455,6 +457,10 @@ static inline void disable_swap_token(void)
 
 static inline void
 mem_cgroup_uncharge_swapcache(struct page *page, swp_entry_t ent)
+{
+}
+
+static inline void ltt_dump_swap_files(void *call_data)
 {
 }
 

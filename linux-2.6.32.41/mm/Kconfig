@@ -288,3 +288,12 @@ config NOMMU_INITIAL_TRIM_EXCESS
 	  of 1 says that all excess pages should be trimmed.
 
 	  See Documentation/nommu-mmap.txt for more information.
+
+config PDFLUSH_RTSCHED
+	bool "Enable real time schedule"
+	default n
+
+config PDFLUSH_RTSCHED_PRIO
+	int "Priority setting (default is the lowest priority) for pdflush"
+	depends on PDFLUSH_RTSCHED
+	default "1"

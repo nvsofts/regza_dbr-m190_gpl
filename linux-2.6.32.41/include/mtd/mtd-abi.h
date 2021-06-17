@@ -88,6 +88,20 @@ struct otp_info {
 	__u32 locked;
 };
 
+struct nand_errstat_cmd {
+	int maf_id;
+	int dev_id;
+	unsigned int command;
+	int column;
+	int page_addr;
+};
+
+struct nand_errstat {
+	int state;
+	size_t count;
+	struct nand_errstat_cmd *addr;
+};
+
 #define MEMGETINFO		_IOR('M', 1, struct mtd_info_user)
 #define MEMERASE		_IOW('M', 2, struct erase_info_user)
 #define MEMWRITEOOB		_IOWR('M', 3, struct mtd_oob_buf)
@@ -110,6 +124,11 @@ struct otp_info {
 #define MEMERASE64		_IOW('M', 20, struct erase_info_user64)
 #define MEMWRITEOOB64		_IOWR('M', 21, struct mtd_oob_buf64)
 #define MEMREADOOB64		_IOWR('M', 22, struct mtd_oob_buf64)
+#ifdef CONFIG_MTD_CHAR_MEMSETFORCEERASE
+#define MEMSETFORCEERASE	_IOW('M', 31, int)
+#endif
+#define MEMGETERRSTAT		_IOW('M', 41, struct nand_errstat)
+#define MEMSETERRSTAT		_IOW('M', 42, struct nand_errstat)
 
 /*
  * Obsolete legacy interface. Keep it in order not to break userspace

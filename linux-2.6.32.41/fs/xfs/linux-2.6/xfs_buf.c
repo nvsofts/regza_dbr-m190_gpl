@@ -862,7 +862,6 @@ xfs_buf_rele(
 	XB_TRACE(bp, "rele", bp->b_relse);
 
 	if (unlikely(!hash)) {
-		ASSERT(!bp->b_relse);
 		if (atomic_dec_and_test(&bp->b_hold))
 			xfs_buf_free(bp);
 		return;
@@ -870,11 +869,7 @@ xfs_buf_rele(
 
 	ASSERT(atomic_read(&bp->b_hold) > 0);
 	if (atomic_dec_and_lock(&bp->b_hold, &hash->bh_lock)) {
-		if (bp->b_relse) {
-			atomic_inc(&bp->b_hold);
-			spin_unlock(&hash->bh_lock);
-			(*(bp->b_relse)) (bp);
-		} else if (bp->b_flags & XBF_FS_MANAGED) {
+		if (bp->b_flags & XBF_FS_MANAGED) {
 			spin_unlock(&hash->bh_lock);
 		} else {
 			ASSERT(!(bp->b_flags & (XBF_DELWRI|_XBF_DELWRI_Q)));

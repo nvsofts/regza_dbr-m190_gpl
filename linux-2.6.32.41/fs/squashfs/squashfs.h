@@ -35,6 +35,13 @@ static inline struct squashfs_inode_info *squashfs_i(struct inode *inode)
 /* block.c */
 extern int squashfs_read_data(struct super_block *, void **, u64, int, u64 *,
 				int, int);
+#ifdef CONFIG_SQUASHFS_LINEAR
+extern void *squashfs_linear_read(struct super_block *sb, unsigned int offset,
+				unsigned int len);
+#define LINEAR(x)	((x)->linear_phys_addr != 0)
+#else
+#define LINEAR(x)	0
+#endif
 
 /* cache.c */
 extern struct squashfs_cache *squashfs_cache_init(char *, int, int);

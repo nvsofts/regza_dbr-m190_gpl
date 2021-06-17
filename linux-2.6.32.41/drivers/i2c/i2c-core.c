@@ -38,6 +38,10 @@
 
 #include "i2c-core.h"
 
+#ifdef CONFIG_I2C_TC90431
+#include <linux/i2c/tc90431.h>
+#endif
+
 
 /* core_lock protects i2c_adapter_idr, userspace_devices, and guarantees
    that device detection, deletion of detected devices, and attach_adapter
@@ -1104,6 +1108,7 @@ int i2c_transfer(struct i2c_adapter *adap, struct i2c_msg *msgs, int num)
 		}
 #endif
 
+#ifndef CONFIG_I2C_TC90431
 		if (in_atomic() || irqs_disabled()) {
 			ret = mutex_trylock(&adap->bus_lock);
 			if (!ret)
@@ -1112,6 +1117,7 @@ int i2c_transfer(struct i2c_adapter *adap, struct i2c_msg *msgs, int num)
 		} else {
 			mutex_lock_nested(&adap->bus_lock, adap->level);
 		}
+#endif
 
 		/* Retry automatically on arbitration loss */
 		orig_jiffies = jiffies;
@@ -1122,7 +1128,9 @@ int i2c_transfer(struct i2c_adapter *adap, struct i2c_msg *msgs, int num)
 			if (time_after(jiffies, orig_jiffies + adap->timeout))
 				break;
 		}
+#ifndef CONFIG_I2C_TC90431
 		mutex_unlock(&adap->bus_lock);
+#endif
 
 		return ret;
 	} else {
@@ -1151,7 +1159,17 @@ int i2c_master_send(struct i2c_client *client,const char *buf ,int count)
 	msg.len = count;
 	msg.buf = (char *)buf;
 
+#ifdef CONFIG_I2C_TC90431
+	mutex_lock_nested(&adap->bus_lock, adap->level);
+	i2c_set_client_privatedata_to_adapter(client);
+#endif
+
 	ret = i2c_transfer(adap, &msg, 1);
+
+#ifdef CONFIG_I2C_TC90431
+	i2c_get_client_privatedata_from_adapter(client);
+	mutex_unlock(&adap->bus_lock);
+#endif
 
 	/* If everything went ok (i.e. 1 msg transmitted), return #bytes
 	   transmitted, else error code. */
@@ -1179,7 +1197,17 @@ int i2c_master_recv(struct i2c_client *client, char *buf ,int count)
 	msg.len = count;
 	msg.buf = buf;
 
+#ifdef CONFIG_I2C_TC90431
+	mutex_lock_nested(&adap->bus_lock, adap->level);
+	i2c_set_client_privatedata_to_adapter(client);
+#endif
+
 	ret = i2c_transfer(adap, &msg, 1);
+
+#ifdef CONFIG_I2C_TC90431
+	i2c_get_client_privatedata_from_adapter(client);
+	mutex_unlock(&adap->bus_lock);
+#endif
 
 	/* If everything went ok (i.e. 1 msg transmitted), return #bytes
 	   transmitted, else error code. */

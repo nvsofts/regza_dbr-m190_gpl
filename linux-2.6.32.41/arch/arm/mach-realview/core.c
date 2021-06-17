@@ -91,7 +91,12 @@ unsigned long long sched_clock(void)
 
 	return v;
 }
-
+#ifdef CONFIG_NETCPURATE
+unsigned long get_netcpurate_cycles(void)
+{
+	return readl(REALVIEW_REFCOUNTER);
+}
+#endif
 
 #define REALVIEW_FLASHCTRL    (__io_address(REALVIEW_SYS_BASE) + REALVIEW_SYS_FLASH_OFFSET)
 

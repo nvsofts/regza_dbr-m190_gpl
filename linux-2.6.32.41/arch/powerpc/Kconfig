@@ -110,6 +110,8 @@ config ARCH_NO_VIRT_TO_BUS
 config PPC
 	bool
 	default y
+	select OF
+	select OF_FLATTREE
 	select HAVE_FTRACE_MCOUNT_RECORD
 	select HAVE_DYNAMIC_FTRACE
 	select HAVE_FUNCTION_TRACER
@@ -119,6 +121,7 @@ config PPC
 	select HAVE_IOREMAP_PROT
 	select HAVE_EFFICIENT_UNALIGNED_ACCESS
 	select HAVE_KPROBES
+	select HAVE_TRACE_CLOCK
 	select HAVE_ARCH_KGDB
 	select HAVE_KRETPROBES
 	select HAVE_ARCH_TRACEHOOK
@@ -130,6 +133,8 @@ config PPC
 	select HAVE_SYSCALL_WRAPPERS if PPC64
 	select GENERIC_ATOMIC64 if PPC32
 	select HAVE_PERF_EVENTS
+	select HAVE_GET_CYCLES if PPC64
+	select HAVE_IMMEDIATE
 
 config EARLY_PRINTK
 	bool
@@ -161,9 +166,6 @@ config ARCH_MAY_HAVE_PC_FDC
 config PPC_OF
 	def_bool y
 
-config OF
-	def_bool y
-
 config PPC_UDBG_16550
 	bool
 	default n
@@ -185,10 +187,6 @@ config GENERIC_BUG
 config SYS_SUPPORTS_APM_EMULATION
 	default y if PMAC_APM_EMU
 	bool
-
-config DTC
-       bool
-       default y
 
 config DEFAULT_UIMAGE
 	bool
@@ -544,14 +542,6 @@ config SCHED_SMT
 	  SMT scheduler support improves the CPU scheduler's decision making
 	  when dealing with POWER5 cpus at a cost of slightly increased
 	  overhead in some places. If unsure say N here.
-
-config PROC_DEVICETREE
-	bool "Support for device tree in /proc"
-	depends on PROC_FS
-	help
-	  This option adds a device-tree directory under /proc which contains
-	  an image of the device tree that the kernel copies from Open
-	  Firmware or other boot firmware. If unsure, say Y here.
 
 config CMDLINE_BOOL
 	bool "Default bootloader kernel arguments"

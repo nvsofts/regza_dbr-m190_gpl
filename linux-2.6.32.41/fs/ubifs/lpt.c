@@ -1156,8 +1156,13 @@ static int validate_pnode(const struct ubifs_info *c, struct ubifs_pnode *pnode,
 			return -EINVAL;
 		if (dirty < 0 || dirty > c->leb_size || (dirty & 7))
 			return -EINVAL;
-		if (dirty + free > c->leb_size)
-			return -EINVAL;
+		if (dirty + free > c->leb_size) {
+			if (free == c->leb_size) {
+				pnode->lprops[i].free = 0;
+				pnode->lprops[i].dirty = c->leb_size;
+			} else
+				return -EINVAL;
+		}
 	}
 	return 0;
 }

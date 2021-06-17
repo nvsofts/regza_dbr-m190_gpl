@@ -345,6 +345,9 @@ static struct omap_clk omap34xx_clks[] = {
  */
 #define DPLL5_FREQ_FOR_USBHOST		120000000
 
+unsigned long long cpu_hz;
+EXPORT_SYMBOL(cpu_hz);
+
 /**
  * omap3430es2_clk_ssi_find_idlest - return CM_IDLEST info for SSI
  * @clk: struct clk * being enabled
@@ -1170,6 +1173,8 @@ int __init omap2_clk_init(void)
 	       "%ld.%01ld/%ld/%ld MHz\n",
 	       (osc_sys_ck.rate / 1000000), (osc_sys_ck.rate / 100000) % 10,
 	       (core_ck.rate / 1000000), (arm_fck.rate / 1000000));
+
+	cpu_hz = arm_fck.rate;
 
 	/*
 	 * Only enable those clocks we will need, let the drivers

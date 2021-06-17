@@ -1888,8 +1888,14 @@ static long futex_wait_restart(struct restart_block *restart)
  * if there are waiters then it will block, it does PI, etc. (Due to
  * races the kernel might see a 0 value of the futex too.)
  */
+#ifdef FUTEX_LOCK_PI_REL
+static int futex_lock_pi(u32 __user *uaddr, int fshared,
+			 int detect, ktime_t *time, int trylock,
+			 clockid_t clock_id)
+#else
 static int futex_lock_pi(u32 __user *uaddr, int fshared,
 			 int detect, ktime_t *time, int trylock)
+#endif /* FUTEX_LOCK_PI_REL */
 {
 	struct hrtimer_sleeper timeout, *to = NULL;
 	struct futex_hash_bucket *hb;
@@ -1901,8 +1907,12 @@ static int futex_lock_pi(u32 __user *uaddr, int fshared,
 
 	if (time) {
 		to = &timeout;
+#ifdef FUTEX_LOCK_PI_REL
+		hrtimer_init_on_stack(&to->timer, clock_id, HRTIMER_MODE_ABS);
+#else
 		hrtimer_init_on_stack(&to->timer, CLOCK_REALTIME,
 				      HRTIMER_MODE_ABS);
+#endif
 		hrtimer_init_sleeper(to, current);
 		hrtimer_set_expires(&to->timer, *time);
 	}
@@ -2575,17 +2585,36 @@ long do_futex(u32 __user *uaddr, int op, u32 val, ktime_t *timeout,
 	case FUTEX_WAKE_OP:
 		ret = futex_wake_op(uaddr, fshared, uaddr2, val, val2, val3);
 		break;
+#ifdef FUTEX_LOCK_PI_REL
+	case FUTEX_LOCK_PI:
+		if (futex_cmpxchg_enabled)
+			ret = futex_lock_pi(uaddr, fshared, val, timeout, 0,
+					    CLOCK_REALTIME);
+		break;
+	case FUTEX_LOCK_PI_REL:
+		if (futex_cmpxchg_enabled)
+			ret = futex_lock_pi(uaddr, fshared, val, timeout, 0,
+					    CLOCK_MONOTONIC);
+		break;
+#else
 	case FUTEX_LOCK_PI:
 		if (futex_cmpxchg_enabled)
 			ret = futex_lock_pi(uaddr, fshared, val, timeout, 0);
 		break;
+#endif /* FUTEX_LOCK_PI_REL */
 	case FUTEX_UNLOCK_PI:
 		if (futex_cmpxchg_enabled)
 			ret = futex_unlock_pi(uaddr, fshared);
 		break;
 	case FUTEX_TRYLOCK_PI:
+#ifdef FUTEX_LOCK_PI_REL
+		if (futex_cmpxchg_enabled)
+			ret = futex_lock_pi(uaddr, fshared, 0, timeout, 1,
+					    CLOCK_REALTIME);
+#else
 		if (futex_cmpxchg_enabled)
 			ret = futex_lock_pi(uaddr, fshared, 0, timeout, 1);
+#endif /* FUTEX_LOCK_PI_REL */
 		break;
 	case FUTEX_WAIT_REQUEUE_PI:
 		val3 = FUTEX_BITSET_MATCH_ANY;
@@ -2611,8 +2640,14 @@ SYSCALL_DEFINE6(futex, u32 __user *, uaddr, int, op, u32, val,
 	ktime_t t, *tp = NULL;
 	u32 val2 = 0;
 	int cmd = op & FUTEX_CMD_MASK;
+#ifdef FUTEX_LOCK_PI_REL
+	long ret;
+#endif
 
 	if (utime && (cmd == FUTEX_WAIT || cmd == FUTEX_LOCK_PI ||
+#ifdef FUTEX_LOCK_PI_REL
+		      cmd == FUTEX_LOCK_PI_REL ||
+#endif
 		      cmd == FUTEX_WAIT_BITSET ||
 		      cmd == FUTEX_WAIT_REQUEUE_PI)) {
 		if (copy_from_user(&ts, utime, sizeof(ts)) != 0)
@@ -2621,7 +2656,11 @@ SYSCALL_DEFINE6(futex, u32 __user *, uaddr, int, op, u32, val,
 			return -EINVAL;
 
 		t = timespec_to_ktime(ts);
+#ifdef FUTEX_LOCK_PI_REL
+		if (cmd == FUTEX_WAIT || cmd == FUTEX_LOCK_PI_REL)
+#else
 		if (cmd == FUTEX_WAIT)
+#endif
 			t = ktime_add_safe(ktime_get(), t);
 		tp = &t;
 	}
@@ -2633,7 +2672,23 @@ SYSCALL_DEFINE6(futex, u32 __user *, uaddr, int, op, u32, val,
 	    cmd == FUTEX_CMP_REQUEUE_PI || cmd == FUTEX_WAKE_OP)
 		val2 = (u32) (unsigned long) utime;
 
+#ifdef FUTEX_LOCK_PI_REL
+	ret = do_futex(uaddr, op, val, tp, uaddr2, val2, val3);
+	if (utime && (cmd == FUTEX_WAIT || cmd == FUTEX_LOCK_PI_REL)) {
+		/* update relative timeout value */
+		t = ktime_sub(t, ktime_get());
+		ts = ktime_to_timespec(t);
+		if (ts.tv_sec < 0) {
+			ts.tv_sec = 0;
+			ts.tv_nsec = 0;
+		}
+		if (copy_to_user(utime, &ts, sizeof(ts)) != 0)
+			return -EFAULT;
+	}
+	return ret;
+#else
 	return do_futex(uaddr, op, val, tp, uaddr2, val2, val3);
+#endif /* FUTEX_LOCK_PI_REL */
 }
 
 static int __init futex_init(void)

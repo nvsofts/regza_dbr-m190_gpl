@@ -41,6 +41,7 @@
 #include <linux/syscalls.h>
 #include <linux/kprobes.h>
 #include <linux/user_namespace.h>
+#include <linux/ltt-tracer.h>
 
 #include <asm/uaccess.h>
 #include <asm/io.h>
@@ -1496,6 +1497,9 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 					      sizeof(me->comm) - 1) < 0)
 				return -EFAULT;
 			set_task_comm(me, comm);
+#ifdef CONFIG_LTT
+			ltt_dump_process_state(me);
+#endif
 			return 0;
 		case PR_GET_NAME:
 			get_task_comm(comm, me);

@@ -881,8 +881,23 @@ do_alignment(unsigned long addr, unsigned int fsr, struct pt_regs *regs)
 
 	if (ai_usermode & UM_SIGNAL)
 		force_sig(SIGBUS, current);
-	else
-		set_cr(cr_no_alignment);
+	else {
+		/*
+		 * We're about to disable the alignment trap and return to
+		 * user space.  But if an interrupt occurs before actually
+		 * reaching user space, then the IRQ vector entry code will
+		 * notice that we were still in kernel space and therefore
+		 * the alignment trap won't be re-enabled in that case as it
+		 * is presumed to be always on from kernel space.
+		 * Let's prevent that race by disabling interrupts here (they
+		 * are disabled on the way back to user space anyway in
+		 * entry-common.S) and disable the alignment trap only if
+		 * there is no work pending for this thread.
+		 */
+		raw_local_irq_disable();
+		if (!(current_thread_info()->flags & _TIF_WORK_MASK))
+			set_cr(cr_no_alignment);
+	}
 
 	return 0;
 }
@@ -919,13 +934,19 @@ static int __init alignment_init(void)
 	 * CPUs since we spin re-faulting the instruction without
 	 * making any progress.
 	 */
+#ifdef CONFIG_DETECT_UNALIGNED_ACCESS
+	cr_alignment |= CR_A;
+	cr_no_alignment |= CR_A;
+	set_cr(cr_alignment);
+	ai_usermode = UM_SIGNAL;
+#else
 	if (cpu_architecture() >= CPU_ARCH_ARMv6 && (cr_alignment & CR_U)) {
 		cr_alignment &= ~CR_A;
 		cr_no_alignment &= ~CR_A;
 		set_cr(cr_alignment);
 		ai_usermode = UM_FIXUP;
 	}
-
+#endif
 	hook_fault_code(1, do_alignment, SIGILL, "alignment exception");
 	hook_fault_code(3, do_alignment, SIGILL, "alignment exception");
 

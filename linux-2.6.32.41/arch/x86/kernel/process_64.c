@@ -36,9 +36,12 @@
 #include <linux/tick.h>
 #include <linux/prctl.h>
 #include <linux/uaccess.h>
+#include <linux/idle.h>
 #include <linux/io.h>
 #include <linux/ftrace.h>
 #include <linux/dmi.h>
+#include <trace/sched.h>
+#include <trace/pm.h>
 
 #include <asm/pgtable.h>
 #include <asm/system.h>
@@ -53,39 +56,40 @@
 #include <asm/syscalls.h>
 #include <asm/ds.h>
 
+DEFINE_TRACE(sched_kthread_create);
+DEFINE_TRACE(pm_idle_exit);
+DEFINE_TRACE(pm_idle_entry);
+
 asmlinkage extern void ret_from_fork(void);
+
+asmlinkage long kernel_thread_asm(int (*fn)(void *), void * arg,
+	unsigned long flags);
 
 DEFINE_PER_CPU(unsigned long, old_rsp);
 static DEFINE_PER_CPU(unsigned char, is_idle);
 
 unsigned long kernel_thread_flags = CLONE_VM | CLONE_UNTRACED;
 
-static ATOMIC_NOTIFIER_HEAD(idle_notifier);
-
-void idle_notifier_register(struct notifier_block *n)
-{
-	atomic_notifier_chain_register(&idle_notifier, n);
-}
-EXPORT_SYMBOL_GPL(idle_notifier_register);
-
-void idle_notifier_unregister(struct notifier_block *n)
-{
-	atomic_notifier_chain_unregister(&idle_notifier, n);
-}
-EXPORT_SYMBOL_GPL(idle_notifier_unregister);
-
 void enter_idle(void)
 {
 	percpu_write(is_idle, 1);
-	atomic_notifier_call_chain(&idle_notifier, IDLE_START, NULL);
+	/*
+	 * Trace last event before calling notifiers. Notifiers flush
+	 * data from buffers before going to idle.
+	 */
+	trace_pm_idle_entry();
+	notify_idle(IDLE_START);
 }
+EXPORT_SYMBOL_GPL(enter_idle);
 
-static void __exit_idle(void)
+void __exit_idle(void)
 {
 	if (x86_test_and_clear_bit_percpu(0, is_idle) == 0)
 		return;
-	atomic_notifier_call_chain(&idle_notifier, IDLE_END, NULL);
+	notify_idle(IDLE_END);
+	trace_pm_idle_exit();
 }
+EXPORT_SYMBOL_GPL(__exit_idle);
 
 /* Called from interrupts to signify idle end */
 void exit_idle(void)
@@ -95,6 +99,7 @@ void exit_idle(void)
 		return;
 	__exit_idle();
 }
+EXPORT_SYMBOL_GPL(exit_idle);
 
 #ifndef CONFIG_SMP
 static inline void play_dead(void)
@@ -673,6 +678,14 @@ long do_arch_prctl(struct task_struct *task, int code, unsigned long addr)
 long sys_arch_prctl(int code, unsigned long addr)
 {
 	return do_arch_prctl(current, code, addr);
+}
+
+asmlinkage int kernel_thread(int (*fn)(void *), void * arg,
+	 unsigned long flags)
+{
+	int pid = kernel_thread_asm(fn, arg, flags);
+	trace_sched_kthread_create(fn, pid);
+	return pid;
 }
 
 unsigned long KSTK_ESP(struct task_struct *task)

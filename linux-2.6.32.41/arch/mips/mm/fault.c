@@ -18,6 +18,7 @@
 #include <linux/smp.h>
 #include <linux/vt_kern.h>		/* For unblank_screen() */
 #include <linux/module.h>
+#include <trace/fault.h>
 
 #include <asm/branch.h>
 #include <asm/mmu_context.h>
@@ -25,6 +26,9 @@
 #include <asm/uaccess.h>
 #include <asm/ptrace.h>
 #include <asm/highmem.h>		/* For VMALLOC_END */
+
+DEFINE_TRACE(page_fault_entry);
+DEFINE_TRACE(page_fault_exit);
 
 /*
  * This routine handles page faults.  It determines the address,
@@ -108,7 +112,10 @@ good_area:
 	 * make sure we exit gracefully rather than endlessly redo
 	 * the fault.
 	 */
+	trace_page_fault_entry(regs, CAUSE_EXCCODE(regs->cp0_cause), mm, vma,
+			       address, write);
 	fault = handle_mm_fault(mm, vma, address, write ? FAULT_FLAG_WRITE : 0);
+	trace_page_fault_exit(fault);
 	if (unlikely(fault & VM_FAULT_ERROR)) {
 		if (fault & VM_FAULT_OOM)
 			goto out_of_memory;

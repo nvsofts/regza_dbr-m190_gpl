@@ -395,6 +395,11 @@ static void ata_force_link_limits(struct ata_link *link)
 					fe->param.lflags, link->flags);
 		}
 	}
+
+	link->hw_sata_spd_limit = 1;
+	ata_link_printk(link, KERN_NOTICE,
+			"FORCE: PHY spd limit set to 1.5Gbps\n");
+
 }
 
 /**

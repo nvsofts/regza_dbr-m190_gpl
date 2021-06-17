@@ -172,6 +172,13 @@ config USB_STORAGE_CYPRESS_ATACB
 
 	  If this driver is compiled as a module, it will be named ums-cypress.
 
+config USB_STORAGE_PORT_DELAY_USE
+	bool "Enable the per-port delay_use control"
+	depends on USB_STORAGE
+	help
+	  This enables the per-port delay_use control.
+	  Please note that this feature will affect the root-hub ports only.
+
 config USB_LIBUSUAL
 	bool "The shared table of common (or usual) storage devices"
 	depends on USB

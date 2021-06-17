@@ -804,6 +804,19 @@ static int create_workqueue_thread(struct cpu_workqueue_struct *cwq, int cpu)
 	 */
 	if (IS_ERR(p))
 		return PTR_ERR(p);
+#ifdef CONFIG_HOTPLUG_RTSCHED
+	if (!strcmp(cwq->wq->name, "khelper")) {
+		cwq->wq->rt = 1;
+		param.sched_priority = CONFIG_HOTPLUG_RTSCHED_PRIO;
+	}
+#endif
+#ifdef CONFIG_BLK_DEV_SD_RTSCHED
+	if (!strcmp(cwq->wq->name, "kblockd")) {
+		cwq->wq->rt = 1;
+		param.sched_priority = CONFIG_BLK_DEV_SD_RTSCHED_ACCESS_PRIO;
+	}
+#endif
+
 	if (cwq->wq->rt)
 		sched_setscheduler_nocheck(p, SCHED_FIFO, &param);
 	cwq->thread = p;

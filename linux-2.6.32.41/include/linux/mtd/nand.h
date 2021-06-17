@@ -174,14 +174,23 @@ typedef enum {
 	(NAND_NO_PADDING | NAND_CACHEPRG | NAND_COPYBACK)
 
 /* Macros to identify the above */
+#if defined(CONFIG_MTD_NAND_TC90431) || \
+	defined(CONFIG_MTD_NAND_TC90431_MODULE)
+#define NAND_CANAUTOINCR(chip) 0
+#else
 #define NAND_CANAUTOINCR(chip) (!(chip->options & NAND_NO_AUTOINCR))
+#endif
 #define NAND_MUST_PAD(chip) (!(chip->options & NAND_NO_PADDING))
 #define NAND_HAS_CACHEPROG(chip) ((chip->options & NAND_CACHEPRG))
 #define NAND_HAS_COPYBACK(chip) ((chip->options & NAND_COPYBACK))
 /* Large page NAND with SOFT_ECC should support subpage reads */
+#if defined(CONFIG_MTD_NAND_TC90431) || \
+	defined(CONFIG_MTD_NAND_TC90431_MODULE)
+#define NAND_SUBPAGE_READ(chip) 0
+#else
 #define NAND_SUBPAGE_READ(chip) ((chip->ecc.mode == NAND_ECC_SOFT) \
 					&& (chip->page_shift > 9))
-
+#endif
 /* Mask to zero out the chip options, which come from the id table */
 #define NAND_CHIPOPTIONS_MSK	(0x0000ffff & ~NAND_NO_AUTOINCR)
 
@@ -214,6 +223,7 @@ typedef enum {
 	FL_SYNCING,
 	FL_CACHEDPRG,
 	FL_PM_SUSPENDED,
+	FL_STATE_MAX,
 } nand_state_t;
 
 /* Keep gcc happy */
@@ -421,6 +431,10 @@ struct nand_chip {
 	struct nand_bbt_descr	*badblock_pattern;
 
 	void		*priv;
+	int		man_id;
+	int		dev_id;
+
+	struct nand_errstat_cmd *errstat_cmd[FL_STATE_MAX];
 };
 
 /*

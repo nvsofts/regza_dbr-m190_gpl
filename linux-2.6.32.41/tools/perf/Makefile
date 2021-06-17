@@ -648,6 +648,12 @@ ifdef NO_EXTERNAL_GREP
 	BASIC_CFLAGS += -DNO_EXTERNAL_GREP
 endif
 
+	OBJDUMP      = $(TARGET)objdump
+	ADDR2LINE    = $(TARGET)addr2line
+
+	BASIC_CFLAGS += -DOBJDUMP=\"$(OBJDUMP)\"
+	BASIC_CFLAGS += -DADDR2LINE=\"$(ADDR2LINE)\"
+
 ifeq ($(PERL_PATH),)
 NO_PERL=NoThanks
 endif

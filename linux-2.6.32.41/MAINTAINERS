@@ -3273,6 +3273,13 @@ S:	Maintained
 F:	Documentation/hwmon/lis3lv02d
 F:	drivers/hwmon/lis3lv02d.*
 
+LINUX TRACE TOOLKIT NEXT GENERATION
+P:	Mathieu Desnoyers
+M:	mathieu.desnoyers@polymtl.ca
+L:	ltt-dev@lttng.org
+W:	http://ltt.polymtl.ca
+S:	Maintained
+
 LM83 HARDWARE MONITOR DRIVER
 M:	Jean Delvare <khali@linux-fr.org>
 L:	lm-sensors@lm-sensors.org

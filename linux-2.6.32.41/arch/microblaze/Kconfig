@@ -8,6 +8,8 @@ config MICROBLAZE
 	select HAVE_LMB
 	select USB_ARCH_HAS_EHCI
 	select ARCH_WANT_OPTIONAL_GPIOLIB
+	select OF
+	select OF_FLATTREE
 
 config SWAP
 	def_bool n
@@ -108,17 +110,6 @@ config CMDLINE_FORCE
 	help
 	  Set this to have arguments from the default kernel command string
 	  override those passed by the boot loader.
-
-config OF
-	def_bool y
-
-config PROC_DEVICETREE
-	bool "Support for device tree in /proc"
-	depends on PROC_FS
-	help
-	  This option adds a device-tree directory under /proc which contains
-	  an image of the device tree that the kernel copies from Open
-	  Firmware or other boot firmware. If unsure, say Y here.
 
 endmenu
 

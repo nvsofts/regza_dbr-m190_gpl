@@ -6,6 +6,7 @@
 #include <linux/ftrace_event.h>
 
 #include <asm/ptrace.h>
+#include <linux/tracepoint.h>
 
 
 /*
@@ -59,5 +60,12 @@ int reg_prof_syscall_exit(char *name);
 void unreg_prof_syscall_exit(char *name);
 
 #endif
+
+DECLARE_TRACE(syscall_entry,
+	TP_PROTO(struct pt_regs *regs, long id),
+	TP_ARGS(regs, id));
+DECLARE_TRACE(syscall_exit,
+	TP_PROTO(long ret),
+	TP_ARGS(ret));
 
 #endif /* _TRACE_SYSCALL_H */

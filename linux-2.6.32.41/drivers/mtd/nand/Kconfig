@@ -469,6 +469,66 @@ config MTD_NAND_TXX9NDFMC
 	help
 	  This enables the NAND flash controller on the TXx9 SoCs.
 
+choice
+	prompt "TOSHIBA NAND SELECT"
+	depends on TOSHIBA_TC90431
+	default MTD_NAND_TC90431
+
+config MTD_NAND_TC90431
+	tristate "NAND Flash support for TC90431 NAND controller"
+	depends on TOSHIBA_TC90431
+	help
+	  This enables the NAND flash controller on the TC90431 NAND controller.
+
+config MTD_NAND_TC90431_HAMMING
+	tristate "NAND Flash support for TC90431 HAMMING NAND controller"
+	depends on TOSHIBA_TC90431
+	help
+	  This enables the NAND flash controller on the TC90431 HAMMING NAND controller.
+endchoice
+
+config MTD_NAND_TC90431_DEBUG
+	bool "Toshiba TC90431 NAND controller debugging messages"
+	depends on TOSHIBA_TC90431 && MTD_NAND_TC90431
+	help
+	  Say Y here if you want the TC90431 NAND controller drivers to
+	  produce a bunch of debug messages to the system log.
+
+config TC90431_HAM_NAND_DEBUG
+	bool "Toshiba TC90431 HAMMING NAND controller debugging messages"
+	depends on TOSHIBA_TC90431 && MTD_NAND_TC90431_HAMMING
+	help
+	  Say Y here if you want the TC90431 HAMMING NAND controller drivers to
+	  produce a bunch of debug messages to the system log.
+
+choice
+	prompt "Toshiba TC90431 NAND controller use NAND CHIP Select."
+	depends on TOSHIBA_TC90431 && (MTD_NAND_TC90431 || MTD_NAND_TC90431_HAMMING)
+	default NAND_CHIP_AUTO
+
+config  NAND_CHIP_AUTO
+	bool "Auto Detect"
+
+config	NAND_CHIP_TC58DVXXXA3TA00
+	bool "TC58DVXXXA3TA00 (Small Page)"
+
+config	NAND_CHIP_TC58DVXXXA5TA00
+	bool "TC58DVXXXA5TA00 (Small Page)"
+
+config NAND_CHIP_TC58NVG1S3ETA00
+	bool "TC58NVG1S3ETA00 (Large Page)"
+
+config NAND_CHIP_TC58NVG0S3ETA00
+	bool "TC58NVG0S3ETA00 (Large Page)"
+
+config NAND_CHIP_TC58NVG2S3ETA00
+	bool "TC58NVG2S3ETA00 (Large Page)"
+
+config NAND_CHIP_NAND01GW3B2BN6
+	bool "NAND01GW3B2BN6 (Large Page)"
+
+endchoice
+
 config MTD_NAND_SOCRATES
 	tristate "Support for NAND on Socrates board"
 	depends on MTD_NAND && SOCRATES

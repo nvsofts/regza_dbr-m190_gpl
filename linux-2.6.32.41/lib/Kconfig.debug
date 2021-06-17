@@ -434,11 +434,19 @@ config DEBUG_MUTEXES
 	 This feature allows mutex semantics violations to be detected and
 	 reported.
 
+config DEBUG_PSRWLOCK
+	bool "Priority-Sifting Reader-Writer Locks: basic checks"
+	depends on DEBUG_KERNEL
+	help
+	 This feature allows psrwlock semantics violations to be detected and
+	 reported.
+
 config DEBUG_LOCK_ALLOC
 	bool "Lock debugging: detect incorrect freeing of live locks"
 	depends on DEBUG_KERNEL && TRACE_IRQFLAGS_SUPPORT && STACKTRACE_SUPPORT && LOCKDEP_SUPPORT
 	select DEBUG_SPINLOCK
 	select DEBUG_MUTEXES
+	select DEBUG_PSRWLOCK
 	select LOCKDEP
 	help
 	 This feature will check whether any held lock (spinlock, rwlock,
@@ -454,6 +462,7 @@ config PROVE_LOCKING
 	select LOCKDEP
 	select DEBUG_SPINLOCK
 	select DEBUG_MUTEXES
+	select DEBUG_PSRWLOCK
 	select DEBUG_LOCK_ALLOC
 	default n
 	help
@@ -504,6 +513,7 @@ config LOCK_STAT
 	select LOCKDEP
 	select DEBUG_SPINLOCK
 	select DEBUG_MUTEXES
+	select DEBUG_PSRWLOCK
 	select DEBUG_LOCK_ALLOC
 	default n
 	help
@@ -641,6 +651,15 @@ config DEBUG_LIST
 	  walking routines.
 
 	  If unsure, say N.
+
+config DEBUG_RCU_HEAD
+	bool "Debug RCU callbacks"
+	depends on DEBUG_KERNEL
+	depends on TREE_RCU
+	help
+	  Enable this to turn on debugging of RCU list heads (call_rcu() usage).
+	  Seems to find problems more quickly with stress-tests in single-cpu
+	  mode.
 
 config DEBUG_SG
 	bool "Debug SG table operations"
@@ -897,6 +916,14 @@ config FAULT_INJECTION_STACKTRACE_FILTER
 	help
 	  Provide stacktrace filter for fault-injection capabilities
 
+config HAVE_PSRWLOCK_ASM_CALL
+	def_bool n
+
+config PSRWLOCK_LATENCY_TEST
+	boolean "Testing API for psrwlock latency test"
+	depends on HAVE_GET_CYCLES
+	help
+
 config LATENCYTOP
 	bool "Latency measuring infrastructure"
 	select FRAME_POINTER if !MIPS && !PPC && !S390
@@ -1050,3 +1077,6 @@ source "samples/Kconfig"
 source "lib/Kconfig.kgdb"
 
 source "lib/Kconfig.kmemcheck"
+
+config PTRACE_MMAPENABLE
+	bool "Enable gdb to access mmap area."

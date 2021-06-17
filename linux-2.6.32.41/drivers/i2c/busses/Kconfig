@@ -779,4 +779,24 @@ config SCx200_ACB
 	  This support is also available as a module.  If so, the module
 	  will be called scx200_acb.
 
+config I2C_TC90431
+	tristate "Toshiba TC90431 I2C controller"
+	depends on I2C && TOSHIBA_TC90431
+
+config I2C_TC90431_DEBUG
+	bool "Toshiba TC90431 I2C controller debugging messages"
+	depends on I2C_TC90431
+	help
+	  Say Y here if you want the TC90431 I2C bus drivers to produce
+	  a bunch of debug messages to the system log.
+
+config I2C_DEVICE_RESET_TIMES
+	int "Times of auto reset for slave device(0=disable, MAX 16)"
+	depends on I2C_TC90431
+	default "10"
+	range 0 16
+	help
+	  This is the times of sending start-stop condition to I2C bus
+	  when I2C tranfser error is happened.
+
 endmenu

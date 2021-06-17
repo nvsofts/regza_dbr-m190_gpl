@@ -127,6 +127,14 @@ module_param (distrust_firmware, bool, 0);
 MODULE_PARM_DESC (distrust_firmware,
 	"true to distrust firmware power/overcurrent setup");
 
+#define ENABLE_POWER_SWITCHING_COMPAT
+#ifdef ENABLE_POWER_SWITCHING_COMPAT
+/* Some boards don't support per-port power switching */
+static int power_switching = 1;
+module_param (power_switching, bool, 0);
+MODULE_PARM_DESC (power_switching, "true (default) to switch port power");
+#endif
+
 /* Some boards leave IR set wrongly, since they fail BIOS/SMM handshakes */
 static int no_handshake = 0;
 module_param (no_handshake, bool, 0);
@@ -717,6 +725,15 @@ retry:
 		val |= RH_A_NOCP;
 		val &= ~(RH_A_POTPGT | RH_A_NPS);
 		ohci_writel (ohci, val, &ohci->regs->roothub.a);
+#ifdef ENABLE_POWER_SWITCHING_COMPAT
+	} else if (power_switching) {
+		/* act like most external hubs:  use per-port power
+		 * switching and overcurrent reporting.
+		 */
+		val &= ~(RH_A_NPS | RH_A_NOCP);
+		val |= RH_A_PSM | RH_A_OCPM;
+		ohci_writel (ohci, val, &ohci->regs->roothub.a);
+#endif
 	} else if ((ohci->flags & OHCI_QUIRK_AMD756) ||
 			(ohci->flags & OHCI_QUIRK_HUB_POWER)) {
 		/* hub power always on; required for AMD-756 and some
@@ -1064,6 +1081,11 @@ MODULE_LICENSE ("GPL");
     defined(CONFIG_CPU_SUBTYPE_SH7786)
 #include "ohci-sh.c"
 #define PLATFORM_DRIVER		ohci_hcd_sh_driver
+#endif
+
+#if defined(CONFIG_TOSHIBA_TC90416) || defined(CONFIG_TOSHIBA_TC90431)
+#include "ohci-tc90416.c"
+#define PLATFORM_DRIVER		ohci_hcd_tc90416_driver
 #endif
 
 

@@ -561,7 +561,7 @@ static int
 process_mmap_event(event_t *event, unsigned long offset, unsigned long head)
 {
 	struct thread *thread;
-	struct map *map = map__new(&event->mmap, NULL, 0);
+	struct map *map = map__new(&event->mmap);
 
 	thread = threads__findnew(event->mmap.pid, &threads, &last_match);
 
@@ -821,7 +821,7 @@ get_source_line(struct symbol *sym, u64 start, int len, const char *filename)
 			continue;
 
 		offset = start + i;
-		sprintf(cmd, "addr2line -e %s %016llx", filename, offset);
+		sprintf(cmd, ADDR2LINE " -e %s %016llx", filename, offset);
 		fp = popen(cmd, "r");
 		if (!fp)
 			continue;
@@ -907,7 +907,7 @@ static void annotate_sym(struct dso *dso, struct symbol *sym)
 	if (verbose >= 2)
 		printf("annotating [%p] %30s : [%p] %30s\n", dso, dso->name, sym, sym->name);
 
-	sprintf(command, "objdump --start-address=0x%016Lx --stop-address=0x%016Lx -dS %s|grep -v %s",
+	sprintf(command, OBJDUMP " --start-address=0x%016Lx --stop-address=0x%016Lx -dS %s|grep -v %s",
 			(u64)start, (u64)end, filename, filename);
 
 	if (verbose >= 3)

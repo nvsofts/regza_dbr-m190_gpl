@@ -31,12 +31,16 @@
 #include <linux/cpu.h>
 #include <linux/console.h>
 #include <linux/vmalloc.h>
+#include <trace/kernel.h>
 
 #include <asm/page.h>
 #include <asm/uaccess.h>
 #include <asm/io.h>
 #include <asm/system.h>
 #include <asm/sections.h>
+
+DEFINE_TRACE(kernel_kernel_kexec);
+DEFINE_TRACE(kernel_crash_kexec);
 
 /* Per cpu memory for storing cpu states in case of system crash. */
 note_buf_t* crash_notes;
@@ -1062,6 +1066,8 @@ asmlinkage long compat_sys_kexec_load(unsigned long entry,
 
 void crash_kexec(struct pt_regs *regs)
 {
+	trace_kernel_crash_kexec(kexec_crash_image, regs);
+
 	/* Take the kexec_mutex here to prevent sys_kexec_load
 	 * running on one cpu from replacing the crash kernel
 	 * we are using after a panic on a different cpu.
@@ -1430,6 +1436,8 @@ module_init(crash_save_vmcoreinfo_init)
 int kernel_kexec(void)
 {
 	int error = 0;
+
+	trace_kernel_kernel_kexec(kexec_image);
 
 	if (!mutex_trylock(&kexec_mutex))
 		return -EBUSY;

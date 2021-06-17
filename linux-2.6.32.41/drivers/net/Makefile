@@ -248,6 +248,7 @@ obj-$(CONFIG_ENC28J60) += enc28j60.o
 obj-$(CONFIG_ETHOC) += ethoc.o
 
 obj-$(CONFIG_XTENSA_XT2000_SONIC) += xtsonic.o
+obj-$(CONFIG_TXSSETH) += txss_eth.o txss_ethtool.o
 
 obj-$(CONFIG_DNET) += dnet.o
 obj-$(CONFIG_MACB) += macb.o
@@ -276,6 +277,7 @@ obj-$(CONFIG_ETRAX_ETHERNET) += cris/
 obj-$(CONFIG_ENP2611_MSF_NET) += ixp2000/
 
 obj-$(CONFIG_NETCONSOLE) += netconsole.o
+obj-$(CONFIG_NETCPURATE) += netcpurate.o
 
 obj-$(CONFIG_FS_ENET) += fs_enet/
 

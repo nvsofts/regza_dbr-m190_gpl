@@ -18,6 +18,7 @@
 	brnz,PREDICT	REG, DEST
 #define BRANCH_REG_NOT_ZERO_ANNUL(PREDICT, REG, DEST) \
 	brnz,a,PREDICT	REG, DEST
+#define __ASM_SEL(a,b)	__ASM_FORM(b)
 #else
 #define BRANCH32(TYPE, PREDICT, DEST) \
 	TYPE		DEST
@@ -35,6 +36,16 @@
 #define BRANCH_REG_NOT_ZERO_ANNUL(PREDICT, REG, DEST) \
 	cmp		REG, 0; \
 	bne,a		DEST
+#define __ASM_SEL(a,b)	__ASM_FORM(a)
 #endif
+
+#ifdef __ASSEMBLY__
+#define __ASM_FORM(x)	x
+#else
+#define __ASM_FORM(x)	" " #x " "
+#endif
+
+#define _ASM_PTR	__ASM_SEL(.word, .xword)
+#define _ASM_UAPTR	__ASM_SEL(.uaword, .uaxword)
 
 #endif /* _SPARC_ASM_H */

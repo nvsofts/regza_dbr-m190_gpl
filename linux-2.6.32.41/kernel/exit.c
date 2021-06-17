@@ -69,6 +69,7 @@ static void __unhash_process(struct task_struct *p)
 		__get_cpu_var(process_counts)--;
 	}
 	list_del_rcu(&p->thread_group);
+	netcpurate_zombie_period(p);
 	list_del_init(&p->sibling);
 }
 
@@ -343,6 +344,7 @@ static void reparent_to_kthreadd(void)
 
 	ptrace_unlink(current);
 	/* Reparent to init */
+	netcpurate_zombie_period(current);
 	current->real_parent = current->parent = kthreadd_task;
 	list_move_tail(&current->sibling, &current->real_parent->children);
 
@@ -515,6 +517,8 @@ struct files_struct *get_files_struct(struct task_struct *task)
 	return files;
 }
 
+EXPORT_SYMBOL(get_files_struct);
+
 void put_files_struct(struct files_struct *files)
 {
 	struct fdtable *fdt;
@@ -533,6 +537,8 @@ void put_files_struct(struct files_struct *files)
 		free_fdtable(fdt);
 	}
 }
+
+EXPORT_SYMBOL(put_files_struct);
 
 void reset_files_struct(struct files_struct *files)
 {

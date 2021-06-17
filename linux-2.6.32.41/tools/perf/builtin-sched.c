@@ -1060,6 +1060,8 @@ latency_switch_event(struct trace_switch_event *switch_event,
 
 	sched_out = threads__findnew(switch_event->prev_pid, &threads, &last_match);
 	sched_in = threads__findnew(switch_event->next_pid, &threads, &last_match);
+	thread__set_comm(sched_out, switch_event->prev_comm);
+	thread__set_comm(sched_in, switch_event->next_comm);
 
 	out_events = thread_atoms_search(&atom_root, sched_out, &cmp_pid);
 	if (!out_events) {
@@ -1098,6 +1100,7 @@ latency_runtime_event(struct trace_runtime_event *runtime_event,
 	BUG_ON(cpu >= MAX_CPUS || cpu < 0);
 
 	thread = threads__findnew(runtime_event->pid, &threads, &last_match);
+	thread__set_comm(thread, runtime_event->comm);
 	atoms = thread_atoms_search(&atom_root, thread, &cmp_pid);
 	if (!atoms) {
 		thread_atoms_insert(thread);
@@ -1126,6 +1129,7 @@ latency_wakeup_event(struct trace_wakeup_event *wakeup_event,
 		return;
 
 	wakee = threads__findnew(wakeup_event->pid, &threads, &last_match);
+	thread__set_comm(wakee, wakeup_event->comm);
 	atoms = thread_atoms_search(&atom_root, wakee, &cmp_pid);
 	if (!atoms) {
 		thread_atoms_insert(wakee);
@@ -1387,6 +1391,8 @@ map_switch_event(struct trace_switch_event *switch_event,
 
 	sched_out = threads__findnew(switch_event->prev_pid, &threads, &last_match);
 	sched_in = threads__findnew(switch_event->next_pid, &threads, &last_match);
+	thread__set_comm(sched_out, switch_event->prev_comm);
+	thread__set_comm(sched_in, switch_event->next_comm);
 
 	curr_thread[this_cpu] = sched_in;
 

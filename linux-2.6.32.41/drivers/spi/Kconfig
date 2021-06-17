@@ -244,6 +244,51 @@ config SPI_XILINX
 	  See the "OPB Serial Peripheral Interface (SPI) (v1.00e)"
 	  Product Specification document (DS464) for hardware details.
 
+config SPI_TC90431
+	tristate "Toshiba TC90431 SPI controller"
+	depends on TOSHIBA_TC90431
+	help
+	  SPI driver for Toshiba TC90431 SPI controller
+
+config SPI_TC90431_DEBUG
+	bool "Toshiba TC90431 SPI controller debugging messages"
+	depends on SPI_TC90431
+	help
+	  Say Y here if you want the TC90431 SPI controller drivers to
+	  produce a bunch of debug messages to the system log.
+
+config SPI_TC90431_SPIC_MAX_HZ
+	int "Toshiba TC90431 SPI controller maximum HZ"
+	depends on SPI_TC90431 && !(SPI_TC90431_SPIC_INHERIT_DIRECT_SETTING && SPI_TC90431_SPIC_FIXED_PRGACC_REG_VAL)
+	default "0"
+	help
+	  Specify SPIC Baud Rate in Hz.
+
+	  If zero, default settings will be applied.
+
+config SPI_TC90431_SPIC_AC_MARGIN
+	int "Toshiba TC90431 SPI controller AC Timing margin"
+	depends on SPI_TC90431 && !(SPI_TC90431_SPIC_INHERIT_DIRECT_SETTING && SPI_TC90431_SPIC_FIXED_PRGACC_REG_VAL)
+	default "0"
+	help
+	  Specify AC timing margin in nano seconds.
+	  This value affects the following parameters;
+	  - SPI_CS_N deassertion time
+
+config SPI_TC90431_SPIC_INHERIT_DIRECT_SETTING
+	bool "Toshiba TC90431 SPI controller Inherit Direct Access Control Setting"
+	depends on SPI_TC90431
+	help
+	  Say 'yes' if you want to inherit the direct access (register & chip)
+	  settings. SPI driver will do nothing and boot-loader seeting is used
+	  as is.
+
+config SPI_TC90431_SPIC_FIXED_PRGACC_REG_VAL
+	bool "Toshiba TC90431 SPI controller Use fixed value for PrgAcc Register0"
+	depends on SPI_TC90431
+	help
+	  Say 'yes' if you want to use pre-defined fixed value for Program access.
+
 #
 # Add new SPI master controllers in alphabetical order above this line
 #

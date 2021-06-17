@@ -25,6 +25,7 @@
 #include <linux/fs.h>
 #include <linux/ftrace.h>
 #include <linux/preempt.h>
+#include <trace/sched.h>
 #include <asm/uaccess.h>
 #include <asm/mmu_context.h>
 #include <asm/pgalloc.h>
@@ -33,6 +34,8 @@
 #include <asm/fpu.h>
 #include <asm/syscalls.h>
 #include <asm/watchdog.h>
+
+DEFINE_TRACE(sched_kthread_create);
 
 int ubc_usercnt = 0;
 
@@ -139,6 +142,8 @@ int kernel_thread(int (*fn)(void *), void * arg, unsigned long flags)
 	/* Ok, create the new process.. */
 	pid = do_fork(flags | CLONE_VM | CLONE_UNTRACED, 0,
 		      &regs, 0, NULL, NULL);
+
+	trace_sched_kthread_create(fn, pid);
 
 	return pid;
 }

@@ -58,7 +58,7 @@ KERNEL_ATTR_RW(uevent_helper);
 static ssize_t profiling_show(struct kobject *kobj,
 				  struct kobj_attribute *attr, char *buf)
 {
-	return sprintf(buf, "%d\n", prof_on);
+	return sprintf(buf, "%d\n", _imv_read(prof_on));
 }
 static ssize_t profiling_store(struct kobject *kobj,
 				   struct kobj_attribute *attr,
@@ -66,7 +66,7 @@ static ssize_t profiling_store(struct kobject *kobj,
 {
 	int ret;
 
-	if (prof_on)
+	if (_imv_read(prof_on))
 		return -EEXIST;
 	/*
 	 * This eventually calls into get_option() which

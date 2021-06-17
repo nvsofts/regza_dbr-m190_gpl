@@ -127,6 +127,7 @@
 #include <linux/jhash.h>
 #include <linux/random.h>
 #include <trace/events/napi.h>
+#include <trace/net.h>
 
 #include "net-sysfs.h"
 
@@ -195,6 +196,13 @@ EXPORT_SYMBOL(dev_base_lock);
 
 #define NETDEV_HASHBITS	8
 #define NETDEV_HASHENTRIES (1 << NETDEV_HASHBITS)
+
+DEFINE_TRACE(net_dev_xmit);
+DEFINE_TRACE(net_dev_receive);
+DEFINE_TRACE(net_napi_schedule);
+DEFINE_TRACE(net_napi_poll);
+DEFINE_TRACE(net_napi_complete);
+EXPORT_TRACEPOINT_SYMBOL_GPL(net_napi_complete);
 
 static inline struct hlist_head *dev_name_hash(struct net *net, const char *name)
 {
@@ -1729,6 +1737,8 @@ int dev_hard_start_xmit(struct sk_buff *skb, struct net_device *dev,
 		if (dev->priv_flags & IFF_XMIT_DST_RELEASE)
 			skb_dst_drop(skb);
 
+		trace_net_dev_xmit(skb);
+
 		rc = ops->ndo_start_xmit(skb, dev);
 		if (rc == NETDEV_TX_OK)
 			txq_trans_update(txq);
@@ -1755,6 +1765,8 @@ gso:
 
 		skb->next = nskb->next;
 		nskb->next = NULL;
+
+		trace_net_dev_xmit(nskb);
 
 		/*
 		 * If device doesnt need nskb->dst, release it right now while
@@ -2020,6 +2032,8 @@ int netif_rx(struct sk_buff *skb)
 
 	if (!skb->tstamp.tv64)
 		net_timestamp(skb);
+
+	trace_net_dev_receive(skb);
 
 	/*
 	 * The code is rearranged so that the path is the most
@@ -2314,6 +2328,8 @@ int netif_receive_skb(struct sk_buff *skb)
 	/* if we've gotten here through NAPI, check netpoll */
 	if (netpoll_receive_skb(skb))
 		return NET_RX_DROP;
+
+	trace_net_dev_receive(skb);
 
 	if (!skb->iif)
 		skb->iif = skb->dev->ifindex;
@@ -2752,6 +2768,8 @@ void __napi_schedule(struct napi_struct *n)
 {
 	unsigned long flags;
 
+	trace_net_napi_schedule(n);
+
 	local_irq_save(flags);
 	list_add_tail(&n->poll_list, &__get_cpu_var(softnet_data).poll_list);
 	__raise_softirq_irqoff(NET_RX_SOFTIRQ);
@@ -2767,6 +2785,7 @@ void __napi_complete(struct napi_struct *n)
 	list_del(&n->poll_list);
 	smp_mb__before_clear_bit();
 	clear_bit(NAPI_STATE_SCHED, &n->state);
+	trace_net_napi_complete(n);
 }
 EXPORT_SYMBOL(__napi_complete);
 
@@ -2867,6 +2886,7 @@ static void net_rx_action(struct softirq_action *h)
 		 */
 		work = 0;
 		if (test_bit(NAPI_STATE_SCHED, &n->state)) {
+			trace_net_napi_poll(n);
 			work = n->poll(n, weight);
 			trace_napi_poll(n);
 		}

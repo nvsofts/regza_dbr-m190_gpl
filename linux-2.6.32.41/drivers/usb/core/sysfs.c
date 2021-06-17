@@ -841,3 +841,122 @@ void usb_remove_sysfs_intf_files(struct usb_interface *intf)
 	device_remove_file(&intf->dev, &dev_attr_interface);
 	intf->sysfs_files_created = 0;
 }
+
+#ifdef CONFIG_USB_HUB_PORT_MANAGEMENT
+/* For overcurrent recovery handling. */
+static ssize_t
+store_overcurret_field(struct device *dev, struct device_attribute *attr,
+		       const char *buf, size_t count)
+{
+	const char recover_cmd[] = "recover";
+	const int len = strlen(recover_cmd);
+
+	if (strncmp(recover_cmd, buf, len) == 0) {
+		/* Let's recover the overcurrent condition. */
+		hub_overcurrent_recover();
+	}
+	return count;
+}
+
+DEVICE_ATTR(recover_oc_condition, S_IWUSR, NULL, store_overcurret_field);
+
+int usb_create_sysfs_overcurrent_files(struct device *dev)
+{
+	int retval;
+
+	/* sysfs group has already been created. */
+	retval = device_create_file(dev, &dev_attr_recover_oc_condition);
+
+	return retval;
+}
+
+void usb_remove_sysfs_overcurrent_files(struct device *dev)
+{
+	device_remove_file(dev, &dev_attr_recover_oc_condition);
+
+}
+
+/* For per port power control. */
+static ssize_t
+store_port_status(struct device *dev, struct device_attribute *attr,
+		  const char *buf, size_t count)
+{
+	struct usb_interface *intf;
+	struct usb_device *udev;
+	unsigned long long ppc_setting;
+	unsigned long ppc_on, ppc_off;
+
+	intf = to_usb_interface(dev);
+	udev = interface_to_usbdev(intf);
+
+	if (sscanf(buf, "%llx", &ppc_setting) != 1)
+		return -EINVAL;
+
+	ppc_on = (unsigned long)ppc_setting;
+	ppc_off = (unsigned long)(ppc_setting >> 32);
+
+	set_hub_port_power_status(udev, ppc_on, ppc_off);
+
+	return count;
+}
+static ssize_t
+show_port_status(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct usb_interface *intf;
+	struct usb_device *udev;
+
+	intf = to_usb_interface(dev);
+	udev = interface_to_usbdev(intf);
+
+	return get_hub_port_status(udev, buf);
+}
+
+DEVICE_ATTR(port_status, S_IWUSR|S_IRUGO, show_port_status, store_port_status);
+
+#ifdef CONFIG_USB_HUB_PORT_TEST
+/* For test mode control. */
+static ssize_t
+store_port_test(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	struct usb_interface *intf;
+	struct usb_device *udev;
+	unsigned int test_mode;
+
+	intf = to_usb_interface(dev);
+	udev = interface_to_usbdev(intf);
+
+	if (sscanf(buf, "%x", &test_mode) != 1)
+		return -EINVAL;
+
+	set_hub_port_test_status(udev, test_mode);
+
+	return count;
+}
+
+DEVICE_ATTR(port_test, S_IWUSR | S_IRUGO, NULL, store_port_test);
+#endif /* CONFIG_USB_HUB_PORT_TEST */
+
+int usb_create_sysfs_port_status_files(struct device *dev)
+{
+	/* sysfs group has already been created. */
+#ifdef CONFIG_USB_HUB_PORT_TEST
+	int ret;
+	ret = device_create_file(dev, &dev_attr_port_status);
+	if (!ret)
+		ret = device_create_file(dev, &dev_attr_port_test);
+	return ret;
+#else  /* CONFIG_USB_HUB_PORT_TEST */
+	return device_create_file(dev, &dev_attr_port_status);
+#endif /* CONFIG_USB_HUB_PORT_TEST */
+}
+
+void usb_remove_sysfs_port_status_files(struct device *dev)
+{
+	device_remove_file(dev, &dev_attr_port_status);
+#ifdef CONFIG_USB_HUB_PORT_TEST
+	device_remove_file(dev, &dev_attr_port_test);
+#endif /* CONFIG_USB_HUB_PORT_TEST */
+
+}
+#endif

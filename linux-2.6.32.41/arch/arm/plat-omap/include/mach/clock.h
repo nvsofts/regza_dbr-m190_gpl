@@ -137,6 +137,8 @@ extern void clk_init_cpufreq_table(struct cpufreq_frequency_table **table);
 
 extern const struct clkops clkops_null;
 
+struct clocksource *get_clocksource_32k(void);
+
 /* Clock flags */
 /* bit 0 is free */
 #define RATE_FIXED		(1 << 1)	/* Fixed clock rate */

@@ -27,6 +27,9 @@
 #include <linux/file.h>
 #include <linux/ipc.h>
 #include <linux/uaccess.h>
+#include <trace/ipc.h>
+
+DEFINE_TRACE(ipc_call);
 
 struct mmap_arg_struct {
 	unsigned long addr;
@@ -88,6 +91,8 @@ asmlinkage int sys_ipc(uint call, int first, int second, int third,
 
 	version = call >> 16; /* hack for backward compatibility */
 	call &= 0xffff;
+
+	trace_ipc_call(call, first);
 
 	switch (call) {
 	case SEMOP:

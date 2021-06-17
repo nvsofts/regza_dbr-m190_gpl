@@ -20,6 +20,9 @@
 #include <linux/mtd/physmap.h>
 #include <linux/mtd/concat.h>
 #include <linux/io.h>
+#ifdef CONFIG_MTD_OF_PARTS
+#include <linux/of.h>
+#endif/*CONFIG_MTD_OF_PARTS*/
 
 #define MAX_RESOURCES		4
 
@@ -91,6 +94,9 @@ static int physmap_flash_probe(struct platform_device *dev)
 	int err = 0;
 	int i;
 	int devices_found = 0;
+#ifdef CONFIG_MTD_OF_PARTS
+	struct device_node *np = NULL;
+#endif/*CONFIG_MTD_OF_PARTS*/
 
 	physmap_data = dev->dev.platform_data;
 	if (physmap_data == NULL)
@@ -172,9 +178,22 @@ static int physmap_flash_probe(struct platform_device *dev)
 #ifdef CONFIG_MTD_PARTITIONS
 	err = parse_mtd_partitions(info->cmtd, part_probe_types,
 				&info->parts, 0);
+#ifdef CONFIG_MTD_OF_PARTS
+	if (err == 0) {
+		np = of_find_compatible_node(NULL, NULL,
+					     "cfi-flash");
+		if (np != NULL)
+			err = of_mtd_parse_partitions(&dev->dev,
+						      np, &info->parts);
+	}
+#endif/*CONFIG_MTD_OF_PARTS*/
 	if (err > 0) {
 		add_mtd_partitions(info->cmtd, info->parts, err);
 		info->nr_parts = err;
+#ifdef CONFIG_MTD_OF_PARTS
+		if (np != NULL)
+			of_node_put(np);
+#endif/*CONFIG_MTD_OF_PARTS*/
 		return 0;
 	}
 
@@ -182,11 +201,19 @@ static int physmap_flash_probe(struct platform_device *dev)
 		printk(KERN_NOTICE "Using physmap partition information\n");
 		add_mtd_partitions(info->cmtd, physmap_data->parts,
 				   physmap_data->nr_parts);
+#ifdef CONFIG_MTD_OF_PARTS
+		if (np != NULL)
+			of_node_put(np);
+#endif/*CONFIG_MTD_OF_PARTS*/
 		return 0;
 	}
 #endif
 
 	add_mtd_device(info->cmtd);
+#ifdef CONFIG_MTD_OF_PARTS
+	if (np != NULL)
+		of_node_put(np);
+#endif/*CONFIG_MTD_OF_PARTS*/
 	return 0;
 
 err_out:

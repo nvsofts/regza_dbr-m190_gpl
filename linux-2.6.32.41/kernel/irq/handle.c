@@ -21,6 +21,7 @@
 #include <linux/hash.h>
 #include <linux/bootmem.h>
 #include <trace/events/irq.h>
+#include <trace/irq.h>
 
 #include "internals.h"
 
@@ -196,6 +197,7 @@ struct irq_desc *irq_to_desc(unsigned int irq)
 
 	return NULL;
 }
+EXPORT_SYMBOL(irq_to_desc);
 
 struct irq_desc * __ref irq_to_desc_alloc_node(unsigned int irq, int node)
 {
@@ -278,6 +280,7 @@ struct irq_desc *irq_to_desc(unsigned int irq)
 {
 	return (irq < NR_IRQS) ? irq_desc + irq : NULL;
 }
+EXPORT_SYMBOL(irq_to_desc);
 
 struct irq_desc *irq_to_desc_alloc_node(unsigned int irq, int node)
 {
@@ -360,6 +363,9 @@ static void warn_no_thread(unsigned int irq, struct irqaction *action)
 	       "but no thread function available.", irq, action->name);
 }
 
+DEFINE_TRACE(irq_entry);
+DEFINE_TRACE(irq_exit);
+
 /**
  * handle_IRQ_event - irq action chain handler
  * @irq:	the interrupt number
@@ -371,6 +377,9 @@ irqreturn_t handle_IRQ_event(unsigned int irq, struct irqaction *action)
 {
 	irqreturn_t ret, retval = IRQ_NONE;
 	unsigned int status = 0;
+
+	netcpurate_irq_period_start(irq);
+	trace_irq_entry(irq, NULL, action);
 
 	if (!(action->flags & IRQF_DISABLED))
 		local_irq_enable_in_hardirq();
@@ -427,6 +436,9 @@ irqreturn_t handle_IRQ_event(unsigned int irq, struct irqaction *action)
 	if (status & IRQF_SAMPLE_RANDOM)
 		add_interrupt_randomness(irq);
 	local_irq_disable();
+
+	netcpurate_irq_period_end(irq);
+	trace_irq_exit(retval);
 
 	return retval;
 }

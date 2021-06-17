@@ -53,6 +53,8 @@
 #include <linux/bootmem.h>
 #include <linux/pci.h>
 #include <linux/debugfs.h>
+#include <linux/of.h>
+#include <linux/of_irq.h>
 
 #include <asm/uaccess.h>
 #include <asm/system.h>
@@ -84,8 +86,6 @@ extern int tau_interrupts(int);
 #endif /* CONFIG_PPC32 */
 
 #ifdef CONFIG_PPC64
-EXPORT_SYMBOL(irq_desc);
-
 int distribute_irqs = 1;
 
 static inline notrace unsigned long get_hard_enabled(void)
@@ -731,18 +731,6 @@ unsigned int irq_create_of_mapping(struct device_node *controller,
 	return virq;
 }
 EXPORT_SYMBOL_GPL(irq_create_of_mapping);
-
-unsigned int irq_of_parse_and_map(struct device_node *dev, int index)
-{
-	struct of_irq oirq;
-
-	if (of_irq_map_one(dev, index, &oirq))
-		return NO_IRQ;
-
-	return irq_create_of_mapping(oirq.controller, oirq.specifier,
-				     oirq.size);
-}
-EXPORT_SYMBOL_GPL(irq_of_parse_and_map);
 
 void irq_dispose_mapping(unsigned int virq)
 {

@@ -421,6 +421,14 @@ static int proc_info (struct Scsi_Host *host, char *buffer,
 	if (inout)
 		return length;
 
+#ifdef CONFIG_SCSI_PROC_FS_REMOVE_CHECK
+	mutex_lock(&(us->dev_mutex));
+	if (test_bit(US_FLIDX_DISCONNECTING, &us->dflags)) {
+		mutex_unlock(&us->dev_mutex);
+		return 0;
+	}
+#endif
+
 	/* print the controller name */
 	SPRINTF("   Host scsi%d: usb-storage\n", host->host_no);
 
@@ -460,6 +468,10 @@ US_DO_ALL_FLAGS
 
 		*(pos++) = '\n';
 	}
+
+#ifdef CONFIG_SCSI_PROC_FS_REMOVE_CHECK
+	mutex_unlock(&us->dev_mutex);
+#endif
 
 	/*
 	 * Calculate start of next buffer, and return value.

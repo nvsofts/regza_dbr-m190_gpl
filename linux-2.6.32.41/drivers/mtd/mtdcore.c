@@ -267,6 +267,9 @@ int add_mtd_device(struct mtd_info *mtd)
 			mtd_table[i] = mtd;
 			mtd->index = i;
 			mtd->usecount = 0;
+#ifdef CONFIG_MTD_CHAR_MEMSETFORCEERASE
+			mtd->flag_force_erase_badblock = 0;
+#endif
 
 			if (is_power_of_2(mtd->erasesize))
 				mtd->erasesize_shift = ffs(mtd->erasesize) - 1;
@@ -381,7 +384,7 @@ int del_mtd_device (struct mtd_info *mtd)
 
 void register_mtd_user (struct mtd_notifier *new)
 {
-	int i;
+	struct mtd_info *mtd;
 
 	mutex_lock(&mtd_table_mutex);
 
@@ -389,9 +392,8 @@ void register_mtd_user (struct mtd_notifier *new)
 
  	__module_get(THIS_MODULE);
 
-	for (i=0; i< MAX_MTD_DEVICES; i++)
-		if (mtd_table[i])
-			new->add(mtd_table[i]);
+	mtd_for_each_device(mtd)
+		new->add(mtd);
 
 	mutex_unlock(&mtd_table_mutex);
 }
@@ -408,15 +410,14 @@ void register_mtd_user (struct mtd_notifier *new)
 
 int unregister_mtd_user (struct mtd_notifier *old)
 {
-	int i;
+	struct mtd_info *mtd;
 
 	mutex_lock(&mtd_table_mutex);
 
 	module_put(THIS_MODULE);
 
-	for (i=0; i< MAX_MTD_DEVICES; i++)
-		if (mtd_table[i])
-			old->remove(mtd_table[i]);
+	mtd_for_each_device(mtd)
+		old->remove(mtd);
 
 	list_del(&old->list);
 	mutex_unlock(&mtd_table_mutex);
@@ -438,42 +439,56 @@ int unregister_mtd_user (struct mtd_notifier *old)
 
 struct mtd_info *get_mtd_device(struct mtd_info *mtd, int num)
 {
-	struct mtd_info *ret = NULL;
-	int i, err = -ENODEV;
+	struct mtd_info *ret = NULL, *other;
+	int err = -ENODEV;
 
 	mutex_lock(&mtd_table_mutex);
 
 	if (num == -1) {
-		for (i=0; i< MAX_MTD_DEVICES; i++)
-			if (mtd_table[i] == mtd)
-				ret = mtd_table[i];
+		mtd_for_each_device(other) {
+			if (other == mtd) {
+				ret = mtd;
+				break;
+			}
+		}
 	} else if (num < MAX_MTD_DEVICES) {
 		ret = mtd_table[num];
 		if (mtd && mtd != ret)
 			ret = NULL;
 	}
 
-	if (!ret)
-		goto out_unlock;
-
-	if (!try_module_get(ret->owner))
-		goto out_unlock;
-
-	if (ret->get_device) {
-		err = ret->get_device(ret);
-		if (err)
-			goto out_put;
+	if (!ret) {
+		ret = ERR_PTR(err);
+		goto out;
 	}
 
-	ret->usecount++;
+	err = __get_mtd_device(ret);
+	if (err)
+		ret = ERR_PTR(err);
+out:
 	mutex_unlock(&mtd_table_mutex);
 	return ret;
+}
 
-out_put:
-	module_put(ret->owner);
-out_unlock:
-	mutex_unlock(&mtd_table_mutex);
-	return ERR_PTR(err);
+
+int __get_mtd_device(struct mtd_info *mtd)
+{
+	int err;
+
+	if (!try_module_get(mtd->owner))
+		return -ENODEV;
+
+	if (mtd->get_device) {
+
+		err = mtd->get_device(mtd);
+
+		if (err) {
+			module_put(mtd->owner);
+			return err;
+		}
+	}
+	mtd->usecount++;
+	return 0;
 }
 
 /**
@@ -487,14 +502,14 @@ out_unlock:
 
 struct mtd_info *get_mtd_device_nm(const char *name)
 {
-	int i, err = -ENODEV;
-	struct mtd_info *mtd = NULL;
+	int err = -ENODEV;
+	struct mtd_info *mtd = NULL, *other;
 
 	mutex_lock(&mtd_table_mutex);
 
-	for (i = 0; i < MAX_MTD_DEVICES; i++) {
-		if (mtd_table[i] && !strcmp(name, mtd_table[i]->name)) {
-			mtd = mtd_table[i];
+	mtd_for_each_device(other) {
+		if (!strcmp(name, other->name)) {
+			mtd = other;
 			break;
 		}
 	}
@@ -524,14 +539,19 @@ out_unlock:
 
 void put_mtd_device(struct mtd_info *mtd)
 {
-	int c;
-
 	mutex_lock(&mtd_table_mutex);
-	c = --mtd->usecount;
+	__put_mtd_device(mtd);
+	mutex_unlock(&mtd_table_mutex);
+
+}
+
+void __put_mtd_device(struct mtd_info *mtd)
+{
+	--mtd->usecount;
+	BUG_ON(mtd->usecount < 0);
+
 	if (mtd->put_device)
 		mtd->put_device(mtd);
-	mutex_unlock(&mtd_table_mutex);
-	BUG_ON(c < 0);
 
 	module_put(mtd->owner);
 }
@@ -569,7 +589,9 @@ EXPORT_SYMBOL_GPL(add_mtd_device);
 EXPORT_SYMBOL_GPL(del_mtd_device);
 EXPORT_SYMBOL_GPL(get_mtd_device);
 EXPORT_SYMBOL_GPL(get_mtd_device_nm);
+EXPORT_SYMBOL_GPL(__get_mtd_device);
 EXPORT_SYMBOL_GPL(put_mtd_device);
+EXPORT_SYMBOL_GPL(__put_mtd_device);
 EXPORT_SYMBOL_GPL(register_mtd_user);
 EXPORT_SYMBOL_GPL(unregister_mtd_user);
 EXPORT_SYMBOL_GPL(default_mtd_writev);
@@ -581,14 +603,9 @@ EXPORT_SYMBOL_GPL(default_mtd_writev);
 
 static struct proc_dir_entry *proc_mtd;
 
-static inline int mtd_proc_info (char *buf, int i)
+static inline int mtd_proc_info(char *buf, struct mtd_info *this)
 {
-	struct mtd_info *this = mtd_table[i];
-
-	if (!this)
-		return 0;
-
-	return sprintf(buf, "mtd%d: %8.8llx %8.8x \"%s\"\n", i,
+	return sprintf(buf, "mtd%d: %8.8llx %8.8x \"%s\"\n", this->index,
 		       (unsigned long long)this->size,
 		       this->erasesize, this->name);
 }
@@ -596,15 +613,15 @@ static inline int mtd_proc_info (char *buf, int i)
 static int mtd_read_proc (char *page, char **start, off_t off, int count,
 			  int *eof, void *data_unused)
 {
-	int len, l, i;
+	struct mtd_info *mtd;
+	int len, l;
         off_t   begin = 0;
 
 	mutex_lock(&mtd_table_mutex);
 
 	len = sprintf(page, "dev:    size   erasesize  name\n");
-        for (i=0; i< MAX_MTD_DEVICES; i++) {
-
-                l = mtd_proc_info(page + len, i);
+	mtd_for_each_device(mtd) {
+		l = mtd_proc_info(page + len, mtd);
                 len += l;
                 if (len+begin > off+count)
                         goto done;

@@ -155,7 +155,7 @@ static void parse_source(struct sym_entry *syme)
 	end = start + sym->end - sym->start + 1;
 	len = sym->end - sym->start;
 
-	sprintf(command, "objdump --start-address=0x%016Lx --stop-address=0x%016Lx -dS %s", start, end, path);
+	sprintf(command, OBJDUMP " --start-address=0x%016Lx --stop-address=0x%016Lx -dS %s", start, end, path);
 
 	file = popen(command, "r");
 	if (!file)

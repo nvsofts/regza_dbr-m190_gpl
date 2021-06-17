@@ -163,7 +163,8 @@ static int dso__load_kallsyms(struct dso *self, symbol_filter_t filter, int v)
 	struct rb_node *nd, *prevnd;
 	char *line = NULL;
 	size_t n;
-	FILE *file = fopen("/proc/kallsyms", "r");
+	FILE *file = fopen(kallsyms_name ? kallsyms_name : "/proc/kallsyms",
+			   "r");
 	int count = 0;
 
 	if (file == NULL)
@@ -408,8 +409,11 @@ static int dso__synthesize_plt_symbols(struct  dso *self, int v)
 	char sympltname[1024];
 	Elf *elf;
 	int nr = 0, symidx, fd, err = 0;
+	char name[PATH_MAX];
 
-	fd = open(self->name, O_RDONLY);
+	snprintf(name, sizeof(name), "%s%s",
+		 symfs_name, self->name);
+	fd = open(name, O_RDONLY);
 	if (fd < 0)
 		goto out;
 
@@ -670,8 +674,12 @@ static char *dso__read_build_id(struct dso *self, int v)
 	char *build_id = NULL, *bid;
 	unsigned char *raw;
 	Elf *elf;
-	int fd = open(self->name, O_RDONLY);
+	int fd;
+	char name[PATH_MAX];
 
+	snprintf(name, sizeof(name), "%s%s",
+		 symfs_name, self->name);
+	fd = open(name, O_RDONLY);
 	if (fd < 0)
 		goto out;
 
@@ -759,24 +767,26 @@ more:
 		self->origin++;
 		switch (self->origin) {
 		case DSO__ORIG_FEDORA:
-			snprintf(name, size, "/usr/lib/debug%s.debug", self->name);
+			snprintf(name, size, "%s/usr/lib/debug%s.debug",
+				 symfs_name, self->name);
 			break;
 		case DSO__ORIG_UBUNTU:
-			snprintf(name, size, "/usr/lib/debug%s", self->name);
+			snprintf(name, size, "%s/usr/lib/debug%s",
+				 symfs_name, self->name);
 			break;
 		case DSO__ORIG_BUILDID:
 			build_id = dso__read_build_id(self, v);
 			if (build_id != NULL) {
 				snprintf(name, size,
-					 "/usr/lib/debug/.build-id/%.2s/%s.debug",
-					build_id, build_id + 2);
+					 "%s/usr/lib/debug/.build-id/%.2s/%s.debug",
+					 symfs_name, build_id, build_id + 2);
 				free(build_id);
 				break;
 			}
 			self->origin++;
 			/* Fall thru */
 		case DSO__ORIG_DSO:
-			snprintf(name, size, "%s", self->name);
+			snprintf(name, size, "%s%s", symfs_name, self->name);
 			break;
 
 		default:
@@ -912,7 +922,7 @@ int dso__load_kernel(struct dso *self, const char *vmlinux,
 {
 	int err = -1;
 
-	if (vmlinux) {
+	if (vmlinux && kallsyms_name == NULL) {
 		err = dso__load_vmlinux(self, vmlinux, filter, v);
 		if (err > 0 && use_modules) {
 			int syms = dso__load_modules(self, filter, v);
@@ -940,6 +950,8 @@ struct dso	*vdso;
 struct dso	*hypervisor_dso;
 
 const char	*vmlinux_name = "vmlinux";
+const char	*kallsyms_name;
+const char	*symfs_name = "";
 int		modules;
 
 static void dsos__add(struct dso *dso)

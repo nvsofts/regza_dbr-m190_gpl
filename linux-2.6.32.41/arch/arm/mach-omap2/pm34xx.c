@@ -22,12 +22,15 @@
 #include <linux/list.h>
 #include <linux/err.h>
 #include <linux/gpio.h>
+#include <trace/pm.h>
 
 #include <mach/sram.h>
 #include <mach/clockdomain.h>
 #include <mach/powerdomain.h>
 #include <mach/control.h>
 #include <mach/serial.h>
+
+#include <asm/trace-clock.h>
 
 #include "cm.h"
 #include "cm-regbits-34xx.h"
@@ -44,6 +47,11 @@ struct power_state {
 #endif
 	struct list_head node;
 };
+
+DEFINE_TRACE(pm_idle_entry);
+DEFINE_TRACE(pm_idle_exit);
+DEFINE_TRACE(pm_suspend_entry);
+DEFINE_TRACE(pm_suspend_exit);
 
 static LIST_HEAD(pwrst_list);
 
@@ -309,7 +317,22 @@ static void omap3_pm_idle(void)
 	if (omap_irq_pending())
 		goto out;
 
+	trace_pm_idle_entry();
+	save_sync_trace_clock();
+
 	omap_sram_idle();
+
+	/*
+	 * Resyncing the trace clock should ideally be done much sooner. When
+	 * we arrive here, there are already some interrupt handlers which have
+	 * run before us, using potentially wrong timestamps. This leads
+	 * to problems when restarting the clock (and synchronizing on the 32k
+	 * clock) if the cycle counter was still active.
+	 * resync_track_clock must ensure that timestamps never ever go
+	 * backward.
+	 */
+	resync_trace_clock();
+	trace_pm_idle_exit();
 
 out:
 	local_fiq_enable();
@@ -342,7 +365,11 @@ static int omap3_pm_suspend(void)
 	}
 
 	omap_uart_prepare_suspend();
+	trace_pm_suspend_entry();
+	save_sync_trace_clock();
 	omap_sram_idle();
+	resync_trace_clock();
+	trace_pm_suspend_exit();
 
 restore:
 	/* Restore next_pwrsts */

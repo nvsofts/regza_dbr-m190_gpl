@@ -677,6 +677,9 @@ serial_txx9_set_termios(struct uart_port *port, struct ktermios *termios,
 		cval |= TXX9_SILCR_UPEN;
 	if (!(termios->c_cflag & PARODD))
 		cval |= TXX9_SILCR_UEPS;
+	cval &= ~TXX9_SILCR_SCS_MASK;
+	cval |= ((up->port.flags & UPF_TXX9_USE_SCLK) ?
+		 TXX9_SILCR_SCS_SCLK_BG : TXX9_SILCR_SCS_IMCLK_BG);
 
 	/*
 	 * Ask the core to calculate the divisor for us.

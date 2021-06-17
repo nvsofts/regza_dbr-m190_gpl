@@ -1206,7 +1206,7 @@ static int
 process_mmap_event(event_t *event, unsigned long offset, unsigned long head)
 {
 	struct thread *thread;
-	struct map *map = map__new(&event->mmap, cwd, cwdlen);
+	struct map *map = map__new(&event->mmap);
 
 	thread = threads__findnew(event->mmap.pid, &threads, &last_match);
 
@@ -1619,6 +1619,7 @@ static const struct option options[] = {
 	OPT_BOOLEAN('D', "dump-raw-trace", &dump_trace,
 		    "dump raw trace in ASCII"),
 	OPT_STRING('k', "vmlinux", &vmlinux_name, "file", "vmlinux pathname"),
+	OPT_STRING(0, "kallsyms", &kallsyms_name, "file", "kallsyms pathname"),
 	OPT_BOOLEAN('f', "force", &force, "don't complain, do it"),
 	OPT_BOOLEAN('m', "modules", &modules,
 		    "load module symbols - WARNING: use only with -k and LIVE kernel"),
@@ -1651,6 +1652,8 @@ static const struct option options[] = {
 	OPT_STRING('t', "field-separator", &field_sep, "separator",
 		   "separator for columns, no spaces will be added between "
 		   "columns '.' is reserved."),
+	OPT_STRING(0, "symfs", &symfs_name, "directory",
+		   "Look for files with symbols relative to this directory"),
 	OPT_END()
 };
 

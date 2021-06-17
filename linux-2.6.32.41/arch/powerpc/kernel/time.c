@@ -54,6 +54,7 @@
 #include <linux/irq.h>
 #include <linux/delay.h>
 #include <linux/perf_event.h>
+#include <trace/trap.h>
 
 #include <asm/io.h>
 #include <asm/processor.h>
@@ -610,6 +611,8 @@ void timer_interrupt(struct pt_regs * regs)
 	 * some CPUs will continuue to take decrementer exceptions */
 	set_dec(DECREMENTER_MAX);
 
+	trace_trap_entry(regs, regs->trap);
+
 #ifdef CONFIG_PPC32
 	if (atomic_read(&ppc_n_lost_interrupts) != 0)
 		do_IRQ(regs);
@@ -656,6 +659,8 @@ void timer_interrupt(struct pt_regs * regs)
 
 	irq_exit();
 	set_irq_regs(old_regs);
+
+	trace_trap_exit();
 }
 
 void wakeup_decrementer(void)

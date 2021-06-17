@@ -1582,6 +1582,14 @@ void scsi_eh_flush_done_q(struct list_head *done_q)
 
 	list_for_each_entry_safe(scmd, next, done_q, eh_entry) {
 		list_del_init(&scmd->eh_entry);
+#ifdef CONFIG_SCSI_REMOVED_HANDLING
+		if ((scmd->sense_buffer[2] & 0xf) == NOT_READY) {
+			/* Don't need to retry the command.
+			   Because, in this case, the media is not ready.
+			   So, I/O request to Media is meaningless. */
+			scmd->allowed = 0;
+		}
+#endif
 		if (scsi_device_online(scmd->device) &&
 		    !scsi_noretry_cmd(scmd) &&
 		    (++scmd->retries <= scmd->allowed)) {
@@ -1660,6 +1668,12 @@ static void scsi_unjam_host(struct Scsi_Host *shost)
 int scsi_error_handler(void *data)
 {
 	struct Scsi_Host *shost = data;
+#ifdef CONFIG_BLK_DEV_SD_RTSCHED
+	struct sched_param param = {
+		.sched_priority = CONFIG_BLK_DEV_SD_RTSCHED_ACCESS_PRIO
+	};
+	sched_setscheduler(current, SCHED_FIFO, &param);
+#endif
 
 	/*
 	 * We use TASK_INTERRUPTIBLE so that the thread is not

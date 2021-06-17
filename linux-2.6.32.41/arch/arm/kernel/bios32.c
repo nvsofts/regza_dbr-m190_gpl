@@ -580,6 +580,11 @@ void __init pci_common_init(struct hw_pci *hw)
 			 * Assign resources.
 			 */
 			pci_bus_assign_resources(bus);
+#ifdef CONFIG_TOSHIBA_TC90431
+			/* no need this if you do not use pcie switches nor
+			   pci bridges */
+			pci_enable_bridges(bus);
+#endif
 		}
 
 		/*

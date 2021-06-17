@@ -426,6 +426,41 @@ config LOG_BUF_SHIFT
 config HAVE_UNSTABLE_SCHED_CLOCK
 	bool
 
+#
+# Architectures with a 64-bits get_cycles() should select this.
+# They should also define
+# get_cycles_barrier() : instruction synchronization barrier if required
+# get_cycles_rate() : cycle counter rate, in HZ. If 0, TSC are not synchronized
+# across CPUs or their frequency may vary due to frequency scaling.
+#
+config HAVE_GET_CYCLES
+	def_bool n
+
+#
+# Architectures with a specialized tracing clock should select this.
+#
+config HAVE_TRACE_CLOCK
+	def_bool n
+
+config HAVE_TRACE_CLOCK_GENERIC
+	bool
+	default y if (!HAVE_TRACE_CLOCK)
+	default n if HAVE_TRACE_CLOCK
+	select HAVE_TRACE_CLOCK_32_TO_64 if (!64BIT)
+
+#
+# Architectures with only a 32-bits clock source should select this.
+#
+config HAVE_TRACE_CLOCK_32_TO_64
+	def_bool n
+
+#
+# Architectures which need to dynamically detect if their TSC is unsynchronized
+# across cpus should select this.
+#
+config HAVE_UNSYNCHRONIZED_TSC
+	def_bool n
+
 menuconfig CGROUPS
 	boolean "Control Group support"
 	help
@@ -786,6 +821,15 @@ config HOTPLUG
 	  disabling this option for embedded systems that do not use modules, a
 	  dynamic /dev tree, or dynamic device discovery.  Just say Y.
 
+config HOTPLUG_RTSCHED
+	bool "Enable real time schedule"
+	depends on HOTPLUG
+
+config HOTPLUG_RTSCHED_PRIO
+	int "Priority setting (default is the lowest priority)"
+	depends on HOTPLUG_RTSCHED
+	default "1"
+
 config PRINTK
 	default y
 	bool "Enable support for printk" if EMBEDDED
@@ -1061,6 +1105,13 @@ config PROFILING
 config TRACEPOINTS
 	bool
 
+config MARKERS
+	bool "Activate markers"
+	select GENERIC_TRACER
+	help
+	  Place an empty function call at each marker site. Can be
+	  dynamically changed for a probe function.
+
 source "arch/Kconfig"
 
 config SLOW_WORK
@@ -1086,6 +1137,26 @@ config SLOW_WORK_DEBUG
 	  including items currently executing.
 
 	  See Documentation/slow-work.txt.
+
+source "ltt/Kconfig"
+
+config HAVE_IMMEDIATE
+	def_bool n
+
+config IMMEDIATE
+	default y
+	depends on HAVE_IMMEDIATE
+	bool "Immediate value optimization" if EMBEDDED
+	help
+	  Immediate values are used as read-mostly variables that are rarely
+	  updated. They use code patching to modify the values inscribed in the
+	  instruction stream. It provides a way to save precious cache lines
+	  that would otherwise have to be used by these variables. They can be
+	  disabled through the EMBEDDED menu.
+
+	  It consumes slightly more memory and modifies the instruction stream
+	  each time any specially-marked variable is updated. Should really be
+	  disabled for embedded systems with read-only text.
 
 endmenu		# General setup
 

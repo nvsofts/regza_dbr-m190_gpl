@@ -18,6 +18,7 @@ config 64BIT
 config SPARC
 	bool
 	default y
+	select OF
 	select HAVE_IDE
 	select HAVE_OPROFILE
 	select HAVE_ARCH_KGDB if !SMP || SPARC64
@@ -41,6 +42,7 @@ config SPARC64
 	select HAVE_KPROBES
 	select HAVE_LMB
 	select HAVE_SYSCALL_WRAPPERS
+	select HAVE_GET_CYCLES
 	select HAVE_DYNAMIC_FTRACE
 	select HAVE_FTRACE_MCOUNT_RECORD
 	select USE_GENERIC_SMP_HELPERS if SMP
@@ -50,6 +52,8 @@ config SPARC64
 	select RTC_DRV_STARFIRE
 	select HAVE_PERF_EVENTS
 	select PERF_USE_VMALLOC
+	select HAVE_TRACE_CLOCK
+	select HAVE_IMMEDIATE
 
 config ARCH_DEFCONFIG
 	string
@@ -133,9 +137,6 @@ config GENERIC_GPIO
 	  Generic GPIO API support
 
 config ARCH_NO_VIRT_TO_BUS
-	def_bool y
-
-config OF
 	def_bool y
 
 config ARCH_SUPPORTS_DEBUG_PAGEALLOC

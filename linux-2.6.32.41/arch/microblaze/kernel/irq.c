@@ -16,19 +16,9 @@
 #include <linux/seq_file.h>
 #include <linux/kernel_stat.h>
 #include <linux/irq.h>
+#include <linux/of_irq.h>
 
 #include <asm/prom.h>
-
-unsigned int irq_of_parse_and_map(struct device_node *dev, int index)
-{
-	struct of_irq oirq;
-
-	if (of_irq_map_one(dev, index, &oirq))
-		return NO_IRQ;
-
-	return oirq.specifier[0];
-}
-EXPORT_SYMBOL_GPL(irq_of_parse_and_map);
 
 static u32 concurrent_irq;
 
@@ -93,3 +83,18 @@ skip:
 	}
 	return 0;
 }
+
+/* MS: There is no any advance mapping mechanism. We are using simple 32bit
+  intc without any cascades or any connection that's why mapping is 1:1 */
+unsigned int irq_create_mapping(struct irq_host *host, irq_hw_number_t hwirq)
+{
+	return hwirq;
+}
+EXPORT_SYMBOL_GPL(irq_create_mapping);
+
+unsigned int irq_create_of_mapping(struct device_node *controller,
+				   const u32 *intspec, unsigned int intsize)
+{
+	return intspec[0];
+}
+EXPORT_SYMBOL_GPL(irq_create_of_mapping);

@@ -22,6 +22,9 @@
 #include <linux/init.h>
 #include <linux/nmi.h>
 #include <linux/dmi.h>
+#include <trace/kernel.h>
+
+DEFINE_TRACE(kernel_panic);
 
 int panic_on_oops;
 static unsigned long tainted_mask;
@@ -57,6 +60,10 @@ NORET_TYPE void panic(const char * fmt, ...)
 	static char buf[1024];
 	va_list args;
 	long i;
+
+	va_start(args, fmt);
+	trace_kernel_panic(fmt, args);
+	va_end(args);
 
 	/*
 	 * It's possible to come here directly from a panic-assertion and

@@ -69,7 +69,35 @@ static struct buffer_head *get_block_length(struct super_block *sb,
 
 	return bh;
 }
+#ifdef CONFIG_SQUASHFS_LINEAR
+static int get_block_length_linear(struct super_block *sb,
+			u64 *cur_index, int *offset, int *length)
+{
+	struct squashfs_sb_info *msblk = sb->s_fs_info;
+	char *data = squashfs_linear_read(sb, *cur_index * msblk->devblksize,
+					  msblk->devblksize);
 
+	*length = (unsigned char) data[*offset] |
+		(unsigned char) data[*offset + 1] << 8;
+	*offset += 2;
+
+	return 1;
+}
+
+/*
+ * Return a pointer to the block in the linearly addressed squashfs image.
+ */
+void *squashfs_linear_read(struct super_block *sb, unsigned int offset,
+			unsigned int len)
+{
+	struct squashfs_sb_info *msblk = sb->s_fs_info;
+
+	if (!len)
+		return NULL;
+
+	return (__force void *)msblk->linear_virt_addr + offset;
+}
+#endif /* CONFIG_SQUASHFS_LINEAR */
 
 /*
  * Read and decompress a metadata block or datablock.  Length is non-zero
@@ -87,12 +115,26 @@ int squashfs_read_data(struct super_block *sb, void **buffer, u64 index,
 	int offset = index & ((1 << msblk->devblksize_log2) - 1);
 	u64 cur_index = index >> msblk->devblksize_log2;
 	int bytes, compressed, b = 0, k = 0, page = 0, avail;
+#ifdef CONFIG_SQUASHFS_LINEAR
+	char *c_buffer = NULL;
+#endif
 
 
+#ifdef CONFIG_SQUASHFS_LINEAR
+	if (LINEAR(msblk))
+		bh = NULL;
+	else {
+		bh = kcalloc((msblk->block_size >> msblk->devblksize_log2) + 1,
+					sizeof(*bh), GFP_KERNEL);
+		if (bh == NULL)
+			return -ENOMEM;
+	}
+#else
 	bh = kcalloc((msblk->block_size >> msblk->devblksize_log2) + 1,
 				sizeof(*bh), GFP_KERNEL);
 	if (bh == NULL)
 		return -ENOMEM;
+#endif
 
 	if (length) {
 		/*
@@ -111,6 +153,12 @@ int squashfs_read_data(struct super_block *sb, void **buffer, u64 index,
 				(index + length) > msblk->bytes_used)
 			goto read_failure;
 
+#ifdef CONFIG_SQUASHFS_LINEAR
+		if (LINEAR(msblk)) {
+			c_buffer = squashfs_linear_read(sb, index, length);
+			goto read_done;
+		}
+#endif
 		for (b = 0; bytes < length; b++, cur_index++) {
 			bh[b] = sb_getblk(sb, cur_index);
 			if (bh[b] == NULL)
@@ -125,10 +173,24 @@ int squashfs_read_data(struct super_block *sb, void **buffer, u64 index,
 		if ((index + 2) > msblk->bytes_used)
 			goto read_failure;
 
+#ifdef CONFIG_SQUASHFS_LINEAR
+		if (LINEAR(msblk)) {
+			if (!get_block_length_linear(sb, &cur_index, &offset,
+						     &length))
+				goto read_failure;
+		} else {
+			bh[0] = get_block_length(sb, &cur_index, &offset,
+						 &length);
+			if (bh[0] == NULL)
+				goto read_failure;
+			b = 1;
+		}
+#else
 		bh[0] = get_block_length(sb, &cur_index, &offset, &length);
 		if (bh[0] == NULL)
 			goto read_failure;
 		b = 1;
+#endif
 
 		bytes = msblk->devblksize - offset;
 		compressed = SQUASHFS_COMPRESSED(length);
@@ -142,6 +204,14 @@ int squashfs_read_data(struct super_block *sb, void **buffer, u64 index,
 		if (length < 0 || length > srclength ||
 					(index + length) > msblk->bytes_used)
 			goto block_release;
+#ifdef CONFIG_SQUASHFS_LINEAR
+		if (LINEAR(msblk)) {
+			c_buffer = squashfs_linear_read(sb,
+					cur_index * msblk->devblksize + offset,
+					length);
+			goto read_done;
+		}
+#endif
 
 		for (; bytes < length; b++) {
 			bh[b] = sb_getblk(sb, ++cur_index);
@@ -151,6 +221,9 @@ int squashfs_read_data(struct super_block *sb, void **buffer, u64 index,
 		}
 		ll_rw_block(READ, b - 1, bh + 1);
 	}
+#ifdef CONFIG_SQUASHFS_LINEAR
+read_done:
+#endif
 
 	if (compressed) {
 		int zlib_err = 0, zlib_init = 0;
@@ -165,8 +238,17 @@ int squashfs_read_data(struct super_block *sb, void **buffer, u64 index,
 		msblk->stream.avail_in = 0;
 
 		bytes = length;
+#ifdef CONFIG_SQUASHFS_LINEAR
+		if (LINEAR(msblk)) {
+			msblk->stream.next_in = c_buffer;
+			msblk->stream.avail_in = bytes;
+		}
+#endif
 		do {
 			if (msblk->stream.avail_in == 0 && k < b) {
+#ifdef CONFIG_SQUASHFS_LINEAR
+				BUG_ON(LINEAR(msblk));
+#endif
 				avail = min(bytes, msblk->devblksize - offset);
 				bytes -= avail;
 				wait_on_buffer(bh[k]);
@@ -203,8 +285,12 @@ int squashfs_read_data(struct super_block *sb, void **buffer, u64 index,
 
 			zlib_err = zlib_inflate(&msblk->stream, Z_SYNC_FLUSH);
 
-			if (msblk->stream.avail_in == 0 && k < b)
+			if (msblk->stream.avail_in == 0 && k < b) {
+#ifdef CONFIG_SQUASHFS_LINEAR
+				BUG_ON(LINEAR(msblk));
+#endif
 				put_bh(bh[k++]);
+			}
 		} while (zlib_err == Z_OK);
 
 		if (zlib_err != Z_STREAM_END) {
@@ -225,6 +311,17 @@ int squashfs_read_data(struct super_block *sb, void **buffer, u64 index,
 		 */
 		int i, in, pg_offset = 0;
 
+#ifdef CONFIG_SQUASHFS_LINEAR
+		if (LINEAR(msblk)) {
+			for (bytes = length; bytes; page++) {
+				avail = min_t(int, bytes, PAGE_CACHE_SIZE);
+				memcpy(buffer[page], c_buffer, avail);
+				bytes -= avail;
+				c_buffer += avail;
+			}
+			goto uncompress_done;
+		}
+#endif
 		for (i = 0; i < b; i++) {
 			wait_on_buffer(bh[i]);
 			if (!buffer_uptodate(bh[i]))
@@ -251,6 +348,9 @@ int squashfs_read_data(struct super_block *sb, void **buffer, u64 index,
 			put_bh(bh[k]);
 		}
 	}
+#ifdef CONFIG_SQUASHFS_LINEAR
+uncompress_done:
+#endif
 
 	kfree(bh);
 	return length;
@@ -259,6 +359,9 @@ release_mutex:
 	mutex_unlock(&msblk->read_data_mutex);
 
 block_release:
+#ifdef CONFIG_SQUASHFS_LINEAR
+	BUG_ON(LINEAR(msblk) && b != 0);
+#endif
 	for (; k < b; k++)
 		put_bh(bh[k]);
 

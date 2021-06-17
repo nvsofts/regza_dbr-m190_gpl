@@ -794,7 +794,8 @@ static void __init setup_clockevent_multiplier(unsigned long hz)
 	sparc64_clockevent.mult = mult;
 }
 
-static unsigned long tb_ticks_per_usec __read_mostly;
+unsigned long tb_ticks_per_usec __read_mostly;
+EXPORT_SYMBOL_GPL(tb_ticks_per_usec);
 
 void __delay(unsigned long loops)
 {

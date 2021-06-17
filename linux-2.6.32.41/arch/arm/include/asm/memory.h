@@ -125,8 +125,10 @@
  * private definitions which should NOT be used outside memory.h
  * files.  Use virt_to_phys/phys_to_virt/__pa/__va instead.
  */
+#ifndef __virt_to_phys
 #define __virt_to_phys(x)	((x) - PAGE_OFFSET + PHYS_OFFSET)
 #define __phys_to_virt(x)	((x) - PHYS_OFFSET + PAGE_OFFSET)
+#endif
 
 /*
  * Convert a physical address to a Page Frame Number and back
@@ -194,7 +196,8 @@ static inline void *phys_to_virt(unsigned long x)
 #ifndef __virt_to_bus
 #define __virt_to_bus	__virt_to_phys
 #define __bus_to_virt	__phys_to_virt
-#define __pfn_to_bus(x)	((x) << PAGE_SHIFT)
+#define __pfn_to_bus(x)	__pfn_to_phys(x)
+#define __bus_to_pfn(x)	__phys_to_pfn(x)
 #endif
 
 static inline __deprecated unsigned long virt_to_bus(void *x)
@@ -303,6 +306,13 @@ static inline __deprecated void *bus_to_virt(unsigned long x)
  */
 #ifndef arch_is_coherent
 #define arch_is_coherent()		0
+#endif
+
+/*
+ * Optional coherency support of each devices.
+ */
+#ifndef dev_is_coherent
+#define dev_is_coherent(dev)		0
 #endif
 
 #endif

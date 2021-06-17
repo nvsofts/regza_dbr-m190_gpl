@@ -69,6 +69,10 @@ MODULE_PARM_DESC(skip_host_reset, "skip global host reset (0=don't skip, 1=skip)
 module_param_named(ignore_sss, ahci_ignore_sss, int, 0444);
 MODULE_PARM_DESC(ignore_sss, "Ignore staggered spinup flag (0=don't ignore, 1=ignore)");
 
+static int max_sectors;
+module_param(max_sectors, int, 0444);
+MODULE_PARM_DESC(max_sectors, "i");
+
 static int ahci_enable_alpm(struct ata_port *ap,
 		enum link_pm policy);
 static void ahci_disable_alpm(struct ata_port *ap);
@@ -1674,6 +1678,8 @@ static void ahci_dev_config(struct ata_device *dev)
 		ata_dev_printk(dev, KERN_INFO,
 			       "SB600 AHCI: limiting to 255 sectors per cmd\n");
 	}
+	if (max_sectors)
+		dev->max_sectors = max_sectors;
 }
 
 static unsigned int ahci_dev_classify(struct ata_port *ap)
@@ -2272,7 +2278,17 @@ static irqreturn_t ahci_interrupt(int irq, void *dev_instance)
 	mmio = host->iomap[AHCI_PCI_BAR];
 
 	/* sigh.  0xffffffff is a valid return from h/w */
+#ifndef CONFIG_TC90431_ACP_WORKAROUND
 	irq_stat = readl(mmio + HOST_IRQ_STAT);
+#else
+ {
+	unsigned long flags;
+	extern spinlock_t l2x0_lock;
+	spin_lock_irqsave(&l2x0_lock, flags);
+	irq_stat = readl(mmio + HOST_IRQ_STAT);
+	spin_unlock_irqrestore(&l2x0_lock, flags);
+ }
+#endif
 	if (!irq_stat)
 		return IRQ_NONE;
 

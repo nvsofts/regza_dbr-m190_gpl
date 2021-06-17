@@ -1162,6 +1162,8 @@ static const struct option options[] = {
 		    "page width"),
 	OPT_BOOLEAN('p', "power-only", &power_only,
 		    "output power data only"),
+	OPT_STRING(0, "symfs", &symfs_name, "directory",
+		   "Look for files with symbols relative to this directory"),
 	OPT_END()
 };
 

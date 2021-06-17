@@ -57,6 +57,24 @@ config SCSI_PROC_FS
 
 	  If unsure say Y.
 
+config SCSI_PROC_FS_REMOVE_CHECK
+	bool "Enable remove check of /proc/scsi"
+	depends on SCSI_PROC_FS
+	help
+	  This enables remove check of /proc/scsi.
+
+config SCSI_REMOVED_HANDLING
+	bool "scsi removed error handling"
+	depends on SCSI
+	help
+	  This enables scsi removed error handling.
+
+config SCSI_TIMEOUT_HANDLING
+	bool "scsi timeout error handling"
+	depends on SCSI
+	help
+	  This enables scsi timeout error handling.
+
 comment "SCSI support type (disk, tape, CD-ROM)"
 	depends on SCSI
 
@@ -81,6 +99,20 @@ config BLK_DEV_SD
 	  (the one containing the directory /) is located on a SCSI disk.
 	  In this case, do not compile the driver for your SCSI host adapter
 	  (below) as a module either.
+
+config BLK_DEV_SD_RTSCHED
+	bool "Enable real time schedule"
+	depends on BLK_DEV_SD
+
+config BLK_DEV_SD_RTSCHED_ACCESS_PRIO
+	int "Priority setting (default is the lowest priority) for device access"
+	depends on BLK_DEV_SD && BLK_DEV_SD_RTSCHED
+	default "1"
+
+config BLK_DEV_SD_RTSCHED_SCAN_PRIO
+	int "Priority setting (default is the lowest priority) for device scan"
+	depends on BLK_DEV_SD && BLK_DEV_SD_RTSCHED
+	default "0"
 
 config CHR_DEV_ST
 	tristate "SCSI tape support"

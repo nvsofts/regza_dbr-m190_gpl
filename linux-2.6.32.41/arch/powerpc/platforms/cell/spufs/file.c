@@ -29,6 +29,7 @@
 #include <linux/poll.h>
 #include <linux/ptrace.h>
 #include <linux/seq_file.h>
+#include <linux/marker.h>
 
 #include <asm/io.h>
 #include <asm/time.h>

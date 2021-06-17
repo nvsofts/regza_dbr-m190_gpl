@@ -40,6 +40,23 @@ static int is_activesync(struct usb_interface_descriptor *desc)
 		&& desc->bInterfaceProtocol == 1;
 }
 
+#if defined(CONFIG_USB_HUB_PORT_MANAGEMENT)
+static const char *name_pwr_err(struct kset *kset, struct kobject *kobj)
+{
+	return "hub_pwr_err";
+}
+
+static void pwr_err_uevent(struct usb_device *udev)
+{
+	struct kobject *kobj = &(&udev->dev)->kobj;
+	static const char *(*name)(struct kset *kset, struct kobject *kobj);
+	name = kobj->kset->uevent_ops->name;
+	kobj->kset->uevent_ops->name = name_pwr_err;
+	kobject_uevent(kobj, KOBJ_OFFLINE);
+	kobj->kset->uevent_ops->name = name;
+}
+#endif
+
 int usb_choose_configuration(struct usb_device *udev)
 {
 	int i;
@@ -132,10 +149,14 @@ int usb_choose_configuration(struct usb_device *udev)
 			best = c;
 	}
 
-	if (insufficient_power > 0)
+	if (insufficient_power > 0) {
+#if defined(CONFIG_USB_HUB_PORT_MANAGEMENT)
+		pwr_err_uevent(udev);
+#endif
 		dev_info(&udev->dev, "rejected %d configuration%s "
 			"due to insufficient available bus power\n",
 			insufficient_power, plural(insufficient_power));
+	}
 
 	if (best) {
 		i = best->desc.bConfigurationValue;

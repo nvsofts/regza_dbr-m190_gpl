@@ -37,6 +37,12 @@
 #include <linux/module.h>
 #include <linux/zlib.h>
 #include <linux/magic.h>
+#ifdef CONFIG_SQUASHFS_LINEAR
+#include <linux/io.h>
+#endif
+#ifdef CONFIG_SQUASHFS_USE_IOREMAP_MEM_CACHED
+#include <asm/mach/map.h>
+#endif
 
 #include "squashfs_fs.h"
 #include "squashfs_fs_sb.h"
@@ -44,6 +50,9 @@
 #include "squashfs.h"
 
 static struct file_system_type squashfs_fs_type;
+#ifdef CONFIG_SQUASHFS_LINEAR
+static struct file_system_type squashfs_linear_fs_type;
+#endif
 static const struct super_operations squashfs_super_ops;
 
 static int supported_squashfs_filesystem(short major, short minor, short comp)
@@ -77,6 +86,11 @@ static int squashfs_fill_super(struct super_block *sb, void *data, int silent)
 	unsigned int fragments;
 	u64 lookup_table_start;
 	int err;
+#ifdef CONFIG_SQUASHFS_LINEAR
+	char *p;
+	char *end;
+	char org_end;
+#endif
 
 	TRACE("Entered squashfs_fill_superblock\n");
 
@@ -100,6 +114,63 @@ static int squashfs_fill_super(struct super_block *sb, void *data, int silent)
 		goto failure;
 	}
 
+#ifdef CONFIG_SQUASHFS_LINEAR
+	/*
+	 * The physical location of the squashfs image is specified as
+	 * a mount parameter.  This parameter is mandatory for obvious
+	 * reasons.  Some validation is made on the phys address but this
+	 * is not exhaustive and we count on the fact that someone using
+	 * this feature is supposed to know what he/she's doing.
+	 */
+	msblk->linear_phys_addr = 0;
+	p = strstr(data ?: "", "physaddr=");
+	err = -EINVAL;
+	if (!p) {
+		if (!sb->s_bdev)	/* avoid crash */
+			goto failed_mount;
+		goto read;
+	}
+	end = strchr(p + 9, ',') ?: p + strlen(p);
+	org_end = *end;
+	*end = '\0';
+	err = strict_strtoul(p + 9, 0, &msblk->linear_phys_addr);
+	*end = org_end;
+	if (err) {
+		pr_err("squshfs: physical address for linear squashfs is invalid\n");
+		goto failed_mount;
+	}
+	if (msblk->linear_phys_addr & (PAGE_SIZE - 1)) {
+		pr_err("squashfs: physical address 0x%lx for"
+			" linear squashfs isn't aligned to a page boundary\n",
+		       msblk->linear_phys_addr);
+		goto failed_mount;
+	}
+	if (msblk->linear_phys_addr == 0) {
+		pr_info("squshfs: physical address for "
+			"linear squashfs image can't be 0\n");
+		goto failed_mount;
+	}
+	pr_info("squashfs: checking physical address 0x%lx for"
+		" linear squashfs image\n",
+		msblk->linear_phys_addr);
+
+	/* Map only one page for now.  Will remap it when fs size is known. */
+#ifdef CONFIG_SQUASHFS_USE_IOREMAP_MEM_CACHED
+	msblk->linear_virt_addr =
+		ioremap_mem_cached(msblk->linear_phys_addr, PAGE_SIZE);
+#else
+	msblk->linear_virt_addr =
+		ioremap(msblk->linear_phys_addr, PAGE_SIZE);
+#endif
+	if (!msblk->linear_virt_addr) {
+		pr_err("squashfs: ioremap of the linear squashfs image failed\n");
+		goto failed_mount;
+	}
+read:
+	if (LINEAR(msblk))
+		msblk->devblksize = BLOCK_SIZE;
+	else
+#endif
 	msblk->devblksize = sb_min_blocksize(sb, BLOCK_SIZE);
 	msblk->devblksize_log2 = ffz(~msblk->devblksize);
 
@@ -123,9 +194,16 @@ static int squashfs_fill_super(struct super_block *sb, void *data, int silent)
 	/* Check it is a SQUASHFS superblock */
 	sb->s_magic = le32_to_cpu(sblk->s_magic);
 	if (sb->s_magic != SQUASHFS_MAGIC) {
-		if (!silent)
+		if (!silent) {
+#ifdef CONFIG_SQUASHFS_LINEAR
+			if (LINEAR(msblk))
+				ERROR("Can't find a SQUASHFS superblock"
+				       " on 0x%lx\n", msblk->linear_phys_addr);
+			else
+#endif
 			ERROR("Can't find a SQUASHFS superblock on %s\n",
 						bdevname(sb->s_bdev, b));
+		}
 		err = -EINVAL;
 		goto failed_mount;
 	}
@@ -149,6 +227,12 @@ static int squashfs_fill_super(struct super_block *sb, void *data, int silent)
 	/* Check the filesystem does not extend beyond the end of the
 	   block device */
 	msblk->bytes_used = le64_to_cpu(sblk->bytes_used);
+#ifdef CONFIG_SQUASHFS_LINEAR
+	if (LINEAR(msblk)) {
+		if (msblk->bytes_used < 0)
+			goto failed_mount;
+	} else
+#endif
 	if (msblk->bytes_used < 0 || msblk->bytes_used >
 			i_size_read(sb->s_bdev->bd_inode))
 		goto failed_mount;
@@ -182,6 +266,12 @@ static int squashfs_fill_super(struct super_block *sb, void *data, int silent)
 	msblk->inodes = le32_to_cpu(sblk->inodes);
 	flags = le16_to_cpu(sblk->flags);
 
+#ifdef CONFIG_SQUASHFS_LINEAR
+	if (LINEAR(msblk))
+		TRACE("Found valid superblock on 0x%lx\n",
+		      msblk->linear_phys_addr);
+	else
+#endif
 	TRACE("Found valid superblock on %s\n", bdevname(sb->s_bdev, b));
 	TRACE("Inodes are %scompressed\n", SQUASHFS_UNCOMPRESSED_INODES(flags)
 				? "un" : "");
@@ -210,6 +300,32 @@ static int squashfs_fill_super(struct super_block *sb, void *data, int silent)
 	if (msblk->block_cache == NULL)
 		goto failed_mount;
 
+#ifdef CONFIG_SQUASHFS_LINEAR
+	if (LINEAR(msblk)) {
+		int size = ALIGN(sblk->bytes_used, PAGE_CACHE_SIZE);
+		/* Remap the whole filesystem now */
+		iounmap(msblk->linear_virt_addr);
+		pr_info("squashfs: linear squashfs image appears to be %u KB in size\n",
+		       size >> 10);
+#if defined(CONFIG_MIPS)
+		msblk->linear_virt_addr =
+			ioremap_cachable(msblk->linear_phys_addr, size);
+#elif defined(CONFIG_SQUASHFS_USE_IOREMAP_MEM_CACHED)
+		msblk->linear_virt_addr =
+			ioremap_mem_cached(msblk->linear_phys_addr, size);
+#elif defined(CONFIG_ARM)
+		msblk->linear_virt_addr =
+			ioremap_cached(msblk->linear_phys_addr, size);
+#else
+		msblk->linear_virt_addr =
+			ioremap(msblk->linear_phys_addr, size);
+#endif
+		if (!msblk->linear_virt_addr) {
+			pr_info("squashfs: ioremap of the linear squashfs image failed\n");
+			goto failed_mount;
+		}
+	}
+#endif
 	/* Allocate read_page block */
 	msblk->read_page = squashfs_cache_init("data", 1, msblk->block_size);
 	if (msblk->read_page == NULL) {
@@ -271,7 +387,8 @@ allocate_root:
 
 	err = squashfs_read_inode(root, root_inode);
 	if (err) {
-		iget_failed(root);
+		make_bad_inode(root);
+		iput(root);
 		goto failed_mount;
 	}
 	insert_inode_hash(root);
@@ -296,6 +413,10 @@ failed_mount:
 	kfree(msblk->fragment_index);
 	kfree(msblk->id_table);
 	kfree(msblk->stream.workspace);
+#ifdef CONFIG_SQUASHFS_LINEAR
+	if (LINEAR(msblk) && msblk->linear_virt_addr)
+		iounmap(msblk->linear_virt_addr);
+#endif
 	kfree(sb->s_fs_info);
 	sb->s_fs_info = NULL;
 	kfree(sblk);
@@ -312,7 +433,12 @@ failure:
 static int squashfs_statfs(struct dentry *dentry, struct kstatfs *buf)
 {
 	struct squashfs_sb_info *msblk = dentry->d_sb->s_fs_info;
+#ifdef CONFIG_SQUASHFS_LINEAR
+	u64 id = LINEAR(msblk) ? msblk->linear_phys_addr :
+		huge_encode_dev(dentry->d_sb->s_bdev->bd_dev);
+#else
 	u64 id = huge_encode_dev(dentry->d_sb->s_bdev->bd_dev);
+#endif
 
 	TRACE("Entered squashfs_statfs\n");
 
@@ -350,6 +476,10 @@ static void squashfs_put_super(struct super_block *sb)
 		kfree(sbi->fragment_index);
 		kfree(sbi->meta_index);
 		kfree(sbi->stream.workspace);
+#ifdef CONFIG_SQUASHFS_LINEAR
+		if (LINEAR(sbi) && sbi->linear_virt_addr)
+			iounmap(sbi->linear_virt_addr);
+#endif /* CONFIG_SQUASHFS_LINEAR */
 		kfree(sb->s_fs_info);
 		sb->s_fs_info = NULL;
 	}
@@ -366,6 +496,14 @@ static int squashfs_get_sb(struct file_system_type *fs_type, int flags,
 				mnt);
 }
 
+#ifdef CONFIG_SQUASHFS_LINEAR
+static int squashfs_linear_get_sb(struct file_system_type *fs_type, int flags,
+				const char *dev_name, void *data,
+				struct vfsmount *mnt)
+{
+	return get_sb_nodev(fs_type, flags, data, squashfs_fill_super, mnt);
+}
+#endif
 
 static struct kmem_cache *squashfs_inode_cachep;
 
@@ -401,11 +539,25 @@ static int __init init_squashfs_fs(void)
 	if (err)
 		return err;
 
+#ifdef CONFIG_SQUASHFS_LINEAR
+	err = register_filesystem(&squashfs_linear_fs_type);
+	if (err) {
+		destroy_inodecache();
+		return err;
+	}
+	err = register_filesystem(&squashfs_fs_type);
+	if (err) {
+		unregister_filesystem(&squashfs_linear_fs_type);
+		destroy_inodecache();
+		return err;
+	}
+#else
 	err = register_filesystem(&squashfs_fs_type);
 	if (err) {
 		destroy_inodecache();
 		return err;
 	}
+#endif
 
 	printk(KERN_INFO "squashfs: version 4.0 (2009/01/31) "
 		"Phillip Lougher\n");
@@ -416,6 +568,9 @@ static int __init init_squashfs_fs(void)
 
 static void __exit exit_squashfs_fs(void)
 {
+#ifdef CONFIG_SQUASHFS_LINEAR
+	unregister_filesystem(&squashfs_linear_fs_type);
+#endif
 	unregister_filesystem(&squashfs_fs_type);
 	destroy_inodecache();
 }
@@ -443,6 +598,15 @@ static struct file_system_type squashfs_fs_type = {
 	.kill_sb = kill_block_super,
 	.fs_flags = FS_REQUIRES_DEV
 };
+
+#ifdef CONFIG_SQUASHFS_LINEAR
+static struct file_system_type squashfs_linear_fs_type = {
+	.owner = THIS_MODULE,
+	.name = "squashfs_linear",
+	.get_sb = squashfs_linear_get_sb,
+	.kill_sb = kill_anon_super,
+};
+#endif
 
 static const struct super_operations squashfs_super_ops = {
 	.alloc_inode = squashfs_alloc_inode,

@@ -227,6 +227,17 @@ struct mtd_info {
 	/* Bad block management functions */
 	int (*block_isbad) (struct mtd_info *mtd, loff_t ofs);
 	int (*block_markbad) (struct mtd_info *mtd, loff_t ofs);
+#ifdef CONFIG_MTD_CHAR_MEMSETFORCEERASE
+	int flag_force_erase_badblock;
+#endif
+
+#if defined(CONFIG_MTD_NAND) || defined(CONFIG_MTD_NAND_MODULE)
+	/* Errstat management functions */
+	int (*errstat_get) (struct mtd_info *mtd, int state,
+			    struct nand_errstat_cmd **esc, size_t *count);
+	int (*errstat_set) (struct mtd_info *mtd, int state,
+			    struct nand_errstat_cmd *esc, size_t count);
+#endif
 
 	struct notifier_block reboot_notifier;  /* default mode before reboot */
 
@@ -290,8 +301,9 @@ extern int add_mtd_device(struct mtd_info *mtd);
 extern int del_mtd_device (struct mtd_info *mtd);
 
 extern struct mtd_info *get_mtd_device(struct mtd_info *mtd, int num);
+extern int __get_mtd_device(struct mtd_info *mtd);
+extern void __put_mtd_device(struct mtd_info *mtd);
 extern struct mtd_info *get_mtd_device_nm(const char *name);
-
 extern void put_mtd_device(struct mtd_info *mtd);
 
 

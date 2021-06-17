@@ -61,6 +61,12 @@ OPTIONS
 		 the tree is considered as a new profiled object. +
 	Default: fractal,0.5.
 
+--kallsyms=<file>::
+        kallsyms pathname
+
+--symfs=<directory>::
+        Look for files with symbols relative to this directory.
+
 SEE ALSO
 --------
 linkperf:perf-stat[1]

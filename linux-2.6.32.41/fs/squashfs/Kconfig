@@ -49,3 +49,37 @@ config SQUASHFS_FRAGMENT_CACHE_SIZE
 
 	  Note there must be at least one cached fragment.  Anything
 	  much more than three will probably not make much difference.
+
+config SQUASHFS_LINEAR
+	bool "Use linear addressing for SquashFS"
+	depends on SQUASHFS
+	help
+	  This option tells the SquashFS driver to load data directly from
+	  a linear adressed memory range (usually non volatile memory
+	  like flash) instead of going through the block device layer.
+	  This saves some memory since no intermediate buffering is
+	  necessary.
+
+	  The location of the SquashFs image in memory is board
+	  dependent. Therefore, if you say Y, you must know the proper
+	  physical address where to store the SquashFS image and specify
+	  it using the physaddr=0x******** mount option (for example:
+	  "mount -t squashfs_linear -o physaddr=0x100000 none /mnt").
+
+	  If unsure, say N.
+
+config ROOT_SQUASHFS_LINEAR
+	bool "Root file system on linear SquashFS"
+	depends on SQUASHFS_LINEAR
+	help
+	  Say Y if you have enabled linear SquashFS, and you want to be
+	  able to use the linear SquashFS image as a root file system.  To
+	  actually have the kernel mount this SquashFS image as a root
+	  file system, you must also pass the command line parameter
+	  "root=/dev/null rootflags=physaddr=0x********" to the kernel
+	  (replace 0x******** with the physical address location of the
+	  linear SquashFS image to boot with).
+
+config SQUASHFS_USE_IOREMAP_MEM_CACHED
+	bool "Use ioremap_mem_nocache to map memory"
+	depends on SQUASHFS_LINEAR && ARM

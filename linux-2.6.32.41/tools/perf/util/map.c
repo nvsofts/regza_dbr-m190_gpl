@@ -9,17 +9,7 @@ static inline int is_anon_memory(const char *filename)
 	return strcmp(filename, "//anon") == 0;
 }
 
-static int strcommon(const char *pathname, char *cwd, int cwdlen)
-{
-	int n = 0;
-
-	while (n < cwdlen && pathname[n] == cwd[n])
-		++n;
-
-	return n;
-}
-
- struct map *map__new(struct mmap_event *event, char *cwd, int cwdlen)
+struct map *map__new(struct mmap_event *event)
 {
 	struct map *self = malloc(sizeof(*self));
 
@@ -27,16 +17,6 @@ static int strcommon(const char *pathname, char *cwd, int cwdlen)
 		const char *filename = event->filename;
 		char newfilename[PATH_MAX];
 		int anon;
-
-		if (cwd) {
-			int n = strcommon(filename, cwd, cwdlen);
-
-			if (n == cwdlen) {
-				snprintf(newfilename, sizeof(newfilename),
-					 ".%s", filename + n);
-				filename = newfilename;
-			}
-		}
 
 		anon = is_anon_memory(filename);
 

@@ -215,6 +215,8 @@ int scsi_execute(struct scsi_device *sdev, const unsigned char *cmd,
 	int ret = DRIVER_ERROR << 24;
 
 	req = blk_get_request(sdev->request_queue, write, __GFP_WAIT);
+	if (!req)
+		return ret;
 
 	if (bufflen &&	blk_rq_map_kern(sdev->request_queue, req,
 					buffer, bufflen, __GFP_WAIT))
@@ -819,6 +821,13 @@ void scsi_io_completion(struct scsi_cmnd *cmd, unsigned int good_bytes)
 				description = "Media Changed";
 				action = ACTION_FAIL;
 			} else {
+#ifdef CONFIG_SCSI_TIMEOUT_HANDLING
+				if (time_after(jiffies, cmd->request->start_time
+					       + 30 * HZ)) {
+					description = "Unit Attention";
+					action = ACTION_FAIL;
+				} else
+#endif
 				/* Must have been a power glitch, or a
 				 * bus reset.  Could not have been a
 				 * media change, so we just retry the

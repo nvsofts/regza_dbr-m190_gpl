@@ -748,7 +748,8 @@ int elv_queue_empty(struct request_queue *q)
 	if (!list_empty(&q->queue_head))
 		return 0;
 
-	if (e->ops->elevator_queue_empty_fn)
+	if (!test_bit(QUEUE_FLAG_DEAD, &q->queue_flags) &&
+	    e->ops->elevator_queue_empty_fn)
 		return e->ops->elevator_queue_empty_fn(q);
 
 	return 1;

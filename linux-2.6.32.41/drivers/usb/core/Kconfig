@@ -140,3 +140,40 @@ config USB_OTG_BLACKLIST_HUB
 	  and software costs by not supporting external hubs.  So
 	  are "Embedded Hosts" that don't offer OTG support.
 
+config USB_HUB_PORT_MANAGEMENT
+	bool "USB port management"
+	depends on USB
+	---help---
+	  If you say Y here, hotplug application will be called when
+	  over-current is detected at roothub or the power is not enough
+	  to configure the connected device, and port power setting will
+	  be managed by sysfs.
+
+config USB_HUB_PORT_TEST
+	bool "USB hub port test mode"
+	depends on USB && USB_HUB_PORT_MANAGEMENT
+	default "N"
+	---help---
+	  If you say Y here, test mode packet can be sent by sysfs.
+
+config USB_HUB_LEVEL_MANAGEMENT
+	bool "USB hub-level management enhancement"
+	depends on USB
+	---help---
+	  If you say Y here, then over-current and port_delay_use will be enabled
+	  under setting hub level.
+
+config USB_HUB_LEVEL_MANAGEMENT_DEFAULT
+	int "Hub level of hub control."
+	depends on USB_HUB_LEVEL_MANAGEMENT
+	default "0"
+
+config USB_HUB_RTSCHED
+	bool "Enable real time schedule"
+	depends on USB
+
+config USB_HUB_RTSCHED_PRIO
+	int "Priority setting (default is the lowest priority) for hub"
+	depends on USB_HUB_RTSCHED
+	default "1"
+

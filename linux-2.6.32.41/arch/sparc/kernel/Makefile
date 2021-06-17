@@ -95,6 +95,7 @@ obj-$(CONFIG_SPARC64_PCI)    += pci_sun4v.o pci_sun4v_asm.o pci_fire.o
 obj-$(CONFIG_PCI_MSI)        += pci_msi.o
 
 obj-$(CONFIG_COMPAT)         += sys32.o sys_sparc32.o signal32.o
+obj-$(USE_IMMEDIATE)         += immediate.o
 
 # sparc64 cpufreq
 obj-$(CONFIG_US3_FREQ)  += us3_cpufreq.o

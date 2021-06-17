@@ -22,6 +22,43 @@
 #include <linux/pid_namespace.h>
 #include <linux/syscalls.h>
 #include <linux/uaccess.h>
+#ifdef CONFIG_PTRACE_MMAPENABLE
+#include <linux/io.h>
+#include <asm/cacheflush.h>
+
+static unsigned long get_phys_addr(struct task_struct *p, unsigned long ptr)
+{
+	pgd_t *pgd;
+	pud_t *pud;
+	pmd_t *pmd;
+	pte_t pte;
+
+	if (!p || !p->mm || ptr >= TASK_SIZE)
+		return 0;
+
+	/* Check for NULL pgd .. shouldn't happen! */
+	if (!p->mm->pgd)
+		return 0;
+
+	pgd = pgd_offset(p->mm, ptr);
+	if (pgd_none(*pgd) || pgd_bad(*pgd))
+		return 0;
+
+	pud = pud_offset(pgd, ptr);
+	if (pud_none(*pud) || pud_bad(*pud))
+		return 0;
+
+	pmd = pmd_offset(pud, ptr);
+	if (pmd_none(*pmd) || pmd_bad(*pmd))
+		return 0;
+
+	pte = *pte_offset_kernel(pmd, ptr);
+	if (!pte_present(pte))
+		return 0;
+
+	return (unsigned long)(pte_val(pte) & PAGE_MASK);
+}
+#endif
 
 
 /*
@@ -651,8 +688,32 @@ int generic_ptrace_peekdata(struct task_struct *tsk, long addr, long data)
 	int copied;
 
 	copied = access_process_vm(tsk, addr, &tmp, sizeof(tmp), 0);
+#ifdef CONFIG_PTRACE_MMAPENABLE
+	if (copied != sizeof(tmp)) {
+		unsigned long tmpptr;
+		tmpptr = get_phys_addr(tsk, addr);
+		if (tmpptr) {
+			void __iomem *mapaddr =
+				ioremap(tmpptr + (addr & ~PAGE_MASK),
+					sizeof(tmp));
+			if (mapaddr) {
+#ifdef CONFIG_MIPS
+				__flush_cache_all();
+#endif
+#ifdef CONFIG_ARM
+				flush_cache_all();
+#endif
+				tmp = __raw_readl(mapaddr);
+				iounmap(mapaddr);
+			} else
+				return -EIO;
+		} else
+			return -EIO;
+	}
+#else
 	if (copied != sizeof(tmp))
 		return -EIO;
+#endif
 	return put_user(tmp, (unsigned long __user *)data);
 }
 

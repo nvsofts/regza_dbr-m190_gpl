@@ -460,6 +460,7 @@ struct phy_device * phy_connect(struct net_device *dev, const char *bus_id,
 void phy_disconnect(struct phy_device *phydev);
 void phy_detach(struct phy_device *phydev);
 void phy_start(struct phy_device *phydev);
+void phy_start_fast(struct phy_device *phydev);
 void phy_stop(struct phy_device *phydev);
 int phy_start_aneg(struct phy_device *phydev);
 

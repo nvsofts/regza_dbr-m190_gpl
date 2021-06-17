@@ -528,6 +528,26 @@ static int __xipram chip_ready(struct map_info *map, unsigned long addr)
 	return map_word_equal(map, d, t);
 }
 
+static int __xipram chip_ready_dq7(struct map_info *map, unsigned long addr,
+				   map_word e)
+{
+	map_word d, t;
+
+#ifdef CONFIG_MTD_CFI_AMDSTD_USE_DQ7_CHECK
+	d = map_read(map, addr);
+	if ((d.x[0] & 0x80) != (e.x[0] & 0x80))
+		return 0;
+#endif
+	d = map_read(map, addr);
+	t = map_read(map, addr);
+
+#ifdef CONFIG_MTD_CFI_AMDSTD_USE_DQ7_CHECK
+	return map_word_equal(map, d, t) &&
+		map_word_equal(map, d, e);
+#endif
+	return map_word_equal(map, d, t);
+}
+
 /*
  * Return true if the chip is ready and has the correct value.
  *
@@ -612,7 +632,7 @@ static int get_chip(struct map_info *map, struct flchip *chip, unsigned long adr
 		chip->state = FL_ERASE_SUSPENDING;
 		chip->erase_suspended = 1;
 		for (;;) {
-			if (chip_ready(map, adr))
+			if (chip_ready_dq7(map, adr, map_word_ff(map)))
 				break;
 
 			if (time_after(jiffies, timeo)) {
@@ -1126,14 +1146,15 @@ static int __xipram do_write_oneword(struct map_info *map, struct flchip *chip, 
 			continue;
 		}
 
-		if (time_after(jiffies, timeo) && !chip_ready(map, adr)){
+		if (time_after(jiffies, timeo)
+		    && !chip_ready_dq7(map, adr, datum)) {
 			xip_enable(map, chip, adr);
 			printk(KERN_WARNING "MTD %s(): software timeout\n", __func__);
 			xip_disable(map, chip, adr);
 			break;
 		}
 
-		if (chip_ready(map, adr))
+		if (chip_ready_dq7(map, adr, datum))
 			break;
 
 		/* Latency issues. Drop the lock, wait a while and retry */
@@ -1387,10 +1408,11 @@ static int __xipram do_write_buffer(struct map_info *map, struct flchip *chip,
 			continue;
 		}
 
-		if (time_after(jiffies, timeo) && !chip_ready(map, adr))
+		if (time_after(jiffies, timeo)
+		    && !chip_ready_dq7(map, adr, datum))
 			break;
 
-		if (chip_ready(map, adr)) {
+		if (chip_ready_dq7(map, adr, datum)) {
 			xip_enable(map, chip, adr);
 			goto op_done;
 		}
@@ -1560,7 +1582,7 @@ static int __xipram do_erase_chip(struct map_info *map, struct flchip *chip)
 			chip->erase_suspended = 0;
 		}
 
-		if (chip_ready(map, adr))
+		if (chip_ready_dq7(map, adr, map_word_ff(map)))
 			break;
 
 		if (time_after(jiffies, timeo)) {
@@ -1648,7 +1670,7 @@ static int __xipram do_erase_oneblock(struct map_info *map, struct flchip *chip,
 			chip->erase_suspended = 0;
 		}
 
-		if (chip_ready(map, adr)) {
+		if (chip_ready_dq7(map, adr, map_word_ff(map))) {
 			xip_enable(map, chip, adr);
 			break;
 		}

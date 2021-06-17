@@ -92,7 +92,7 @@ module_param (log2_irq_thresh, int, S_IRUGO);
 MODULE_PARM_DESC (log2_irq_thresh, "log2 IRQ latency, 1-64 microframes");
 
 /* initial park setting:  slower than hw default */
-static unsigned park = 0;
+static unsigned park = CONFIG_USB_EHCI_PARK_SETTING;
 module_param (park, uint, S_IRUGO);
 MODULE_PARM_DESC (park, "park setting; 1-3 back-to-back async packets");
 
@@ -852,6 +852,7 @@ static int ehci_urb_enqueue (
 ) {
 	struct ehci_hcd		*ehci = hcd_to_ehci (hcd);
 	struct list_head	qtd_list;
+	int rc;
 
 	INIT_LIST_HEAD (&qtd_list);
 
@@ -867,19 +868,22 @@ static int ehci_urb_enqueue (
 	default:
 		if (!qh_urb_transaction (ehci, urb, &qtd_list, mem_flags))
 			return -ENOMEM;
-		return submit_async(ehci, urb, &qtd_list, mem_flags);
-
+		rc = submit_async(ehci, urb, &qtd_list, mem_flags);
+		break;
 	case PIPE_INTERRUPT:
 		if (!qh_urb_transaction (ehci, urb, &qtd_list, mem_flags))
 			return -ENOMEM;
-		return intr_submit(ehci, urb, &qtd_list, mem_flags);
-
+		rc = intr_submit(ehci, urb, &qtd_list, mem_flags);
+		break;
 	case PIPE_ISOCHRONOUS:
 		if (urb->dev->speed == USB_SPEED_HIGH)
-			return itd_submit (ehci, urb, mem_flags);
+			rc = itd_submit (ehci, urb, mem_flags);
 		else
-			return sitd_submit (ehci, urb, mem_flags);
+			rc = sitd_submit (ehci, urb, mem_flags);
+		break;
 	}
+	wmb();
+	return rc;
 }
 
 static void unlink_async (struct ehci_hcd *ehci, struct ehci_qh *qh)
@@ -981,6 +985,7 @@ static int ehci_urb_dequeue(struct usb_hcd *hcd, struct urb *urb, int status)
 	}
 done:
 	spin_unlock_irqrestore (&ehci->lock, flags);
+	wmb();
 	return rc;
 }
 
@@ -1153,6 +1158,11 @@ MODULE_LICENSE ("GPL");
 #ifdef CONFIG_ARCH_AT91
 #include "ehci-atmel.c"
 #define	PLATFORM_DRIVER		ehci_atmel_driver
+#endif
+
+#if defined(CONFIG_TOSHIBA_TC90416) || defined(CONFIG_TOSHIBA_TC90431)
+#include "ehci-tc90416.c"
+#define	PLATFORM_DRIVER		ehci_hcd_tc90416_driver
 #endif
 
 #if !defined(PCI_DRIVER) && !defined(PLATFORM_DRIVER) && \

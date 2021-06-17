@@ -413,7 +413,8 @@ config CPU_32v6K
 
 # ARMv7
 config CPU_V7
-	bool "Support ARM V7 processor" if ARCH_INTEGRATOR || MACH_REALVIEW_EB || MACH_REALVIEW_PBX
+	bool "Support ARM V7 processor" if ARCH_INTEGRATOR || MACH_REALVIEW_EB || \
+		MACH_REALVIEW_PBX || ARCH_TC9043X
 	select CPU_32v6K
 	select CPU_32v7
 	select CPU_ABRT_EV7
@@ -453,6 +454,10 @@ config CPU_32v6
 
 config CPU_32v7
 	bool
+
+# Cortex-A9
+config CORTEX_A9
+        bool
 
 # The abort model
 config CPU_ABRT_NOMMU
@@ -719,17 +724,6 @@ config TLS_REG_EMUL
 	  a few prototypes like that in existence) and therefore access to
 	  that required register must be emulated.
 
-config HAS_TLS_REG
-	bool
-	depends on !TLS_REG_EMUL
-	default y if SMP || CPU_32v7
-	help
-	  This selects support for the CP15 thread register.
-	  It is defined to be available on some ARMv6 processors (including
-	  all SMP capable ARMv6's) or later processors.  User space may
-	  assume directly accessing that register and always obtain the
-	  expected value only on ARMv7 and above.
-
 config NEEDS_SYSCALL_FOR_CMPXCHG
 	bool
 	help
@@ -739,6 +733,12 @@ config NEEDS_SYSCALL_FOR_CMPXCHG
 
 config OUTER_CACHE
 	bool
+
+config OUTER_CACHE_SYNC
+	bool
+	help
+	  The outer cache has a outer_cache_fns.sync function pointer
+	  that can be used to drain the write buffer of the outer cache.
 
 config CACHE_FEROCEON_L2
 	bool "Enable the Feroceon L2 cache controller"
@@ -758,11 +758,21 @@ config CACHE_FEROCEON_L2_WRITETHROUGH
 config CACHE_L2X0
 	bool "Enable the L2x0 outer cache controller"
 	depends on REALVIEW_EB_ARM11MP || MACH_REALVIEW_PB11MP || MACH_REALVIEW_PB1176 || \
-		   REALVIEW_EB_A9MP || ARCH_MX35 || ARCH_MX31 || MACH_REALVIEW_PBX || ARCH_NOMADIK
+		   REALVIEW_EB_A9MP || ARCH_MX35 || ARCH_MX31 || MACH_REALVIEW_PBX || \
+		   ARCH_NOMADIK || TOSHIBA_TC90431
 	default y
 	select OUTER_CACHE
+	select OUTER_CACHE_SYNC
 	help
 	  This option enables the L2x0 PrimeCell.
+
+config CACHE_PL310
+	bool
+	depends on CACHE_L2X0
+	default y if CPU_V7 && !CPU_V6
+	help
+	  This option enables optimisations for the PL310 cache
+	  controller.
 
 config CACHE_XSC3L2
 	bool "Enable the L2 cache on XScale3"
@@ -776,3 +786,28 @@ config ARM_L1_CACHE_SHIFT
 	int
 	default 6 if ARCH_OMAP3
 	default 5
+
+config ARM_DMA_MEM_BUFFERABLE
+	bool "Use non-cacheable memory for DMA" if CPU_V6 && !CPU_V7
+	default y if CPU_V6 || CPU_V7
+	help
+	  Historically, the kernel has used strongly ordered mappings to
+	  provide DMA coherent memory.  With the advent of ARMv7, mapping
+	  memory with differing types results in unpredictable behaviour,
+	  so on these CPUs, this option is forced on.
+
+	  Multiple mappings with differing attributes is also unpredictable
+	  on ARMv6 CPUs, but since they do not have aggressive speculative
+	  prefetch, no harm appears to occur.
+
+	  However, drivers may be missing the necessary barriers for ARMv6,
+	  and therefore turning this on may result in unpredictable driver
+	  behaviour.  Therefore, we offer this as an option.
+
+	  You are recommended say 'Y' here and debug any affected drivers.
+
+config ARCH_HAS_BARRIERS
+	bool
+	help
+	  This option allows the use of custom mandatory barriers
+	  included via the mach/barriers.h file.

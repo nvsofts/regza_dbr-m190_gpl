@@ -159,7 +159,7 @@ config MTD_AFS_PARTS
 
 config MTD_OF_PARTS
 	tristate "Flash partition map based on OF description"
-	depends on (MICROBLAZE || PPC_OF) && MTD_PARTITIONS
+	depends on (MICROBLAZE || PPC_OF || ARM) && MTD_PARTITIONS
 	help
 	  This provides a partition parsing function which derives
 	  the partition map from the children of the flash node,
@@ -180,6 +180,11 @@ config MTD_CHAR
 	  the system, allowing the user to read and write directly to the
 	  memory chips, and also use ioctl() to obtain information about
 	  the device, or to erase parts of it.
+
+config MTD_CHAR_MEMSETFORCEERASE
+	bool "Enable ioctl MEMSETFORCEERASE for force erase BadBlocks"
+	depends on MTD_CHAR
+	default n
 
 config HAVE_MTD_OTP
 	bool
@@ -328,5 +333,7 @@ source "drivers/mtd/onenand/Kconfig"
 source "drivers/mtd/lpddr/Kconfig"
 
 source "drivers/mtd/ubi/Kconfig"
+
+source "drivers/mtd/bynd/Kconfig"
 
 endif # MTD

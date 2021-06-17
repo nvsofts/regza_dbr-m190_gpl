@@ -14,6 +14,7 @@
  * See the file COPYING for more details.
  */
 
+#include <linux/immediate.h>
 #include <linux/types.h>
 #include <linux/rcupdate.h>
 
@@ -22,7 +23,7 @@ struct tracepoint;
 
 struct tracepoint {
 	const char *name;		/* Tracepoint name */
-	int state;			/* State. */
+	DEFINE_IMV(char, state);	/* State. */
 	void (*regfunc)(void);
 	void (*unregfunc)(void);
 	void **funcs;
@@ -37,6 +38,25 @@ struct tracepoint {
 
 #define TP_PROTO(args...)	args
 #define TP_ARGS(args...)	args
+
+#define DECLARE_TRACE_NOP(name, proto, args)				\
+	static inline void trace_##name(proto)				\
+	{ }								\
+	static inline void _trace_##name(proto)				\
+	{ }								\
+	static inline int register_trace_##name(void (*probe)(proto))	\
+	{								\
+		return -ENOSYS;						\
+	}								\
+	static inline int unregister_trace_##name(void (*probe)(proto))	\
+	{								\
+		return -ENOSYS;						\
+	}
+
+#define DEFINE_TRACE_FN_NOP(name, reg, unreg)
+#define DEFINE_TRACE_NOP(name)
+#define EXPORT_TRACEPOINT_SYMBOL_GPL_NOP(name)
+#define EXPORT_TRACEPOINT_SYMBOL_NOP(name)
 
 #ifdef CONFIG_TRACEPOINTS
 
@@ -58,18 +78,38 @@ struct tracepoint {
 		rcu_read_unlock_sched_notrace();			\
 	} while (0)
 
+#define __CHECK_TRACE(name, generic, proto, args)			\
+	do {								\
+		if (!generic) {						\
+			if (unlikely(imv_read(__tracepoint_##name.state))) \
+				__DO_TRACE(&__tracepoint_##name,	\
+					TP_PROTO(proto), TP_ARGS(args));\
+		} else {						\
+			if (unlikely(_imv_read(__tracepoint_##name.state))) \
+				__DO_TRACE(&__tracepoint_##name,	\
+					TP_PROTO(proto), TP_ARGS(args));\
+		}							\
+	} while (0)
+
 /*
  * Make sure the alignment of the structure in the __tracepoints section will
  * not add unwanted padding between the beginning of the section and the
  * structure. Force alignment to the same alignment as the section start.
+ *
+ * The "generic" argument, passed to the declared __trace_##name inline
+ * function controls which tracepoint enabling mechanism must be used.
+ * If generic is true, a variable read is used.
+ * If generic is false, immediate values are used.
  */
 #define DECLARE_TRACE(name, proto, args)				\
 	extern struct tracepoint __tracepoint_##name;			\
 	static inline void trace_##name(proto)				\
 	{								\
-		if (unlikely(__tracepoint_##name.state))		\
-			__DO_TRACE(&__tracepoint_##name,		\
-				TP_PROTO(proto), TP_ARGS(args));	\
+		__CHECK_TRACE(name, 0, TP_PROTO(proto), TP_ARGS(args));	\
+	}								\
+	static inline void _trace_##name(proto)				\
+	{								\
+		__CHECK_TRACE(name, 1, TP_PROTO(proto), TP_ARGS(args));	\
 	}								\
 	static inline int register_trace_##name(void (*probe)(proto))	\
 	{								\
@@ -100,25 +140,13 @@ extern void tracepoint_update_probe_range(struct tracepoint *begin,
 	struct tracepoint *end);
 
 #else /* !CONFIG_TRACEPOINTS */
-#define DECLARE_TRACE(name, proto, args)				\
-	static inline void _do_trace_##name(struct tracepoint *tp, proto) \
-	{ }								\
-	static inline void trace_##name(proto)				\
-	{ }								\
-	static inline int register_trace_##name(void (*probe)(proto))	\
-	{								\
-		return -ENOSYS;						\
-	}								\
-	static inline int unregister_trace_##name(void (*probe)(proto))	\
-	{								\
-		return -ENOSYS;						\
-	}
 
-#define DEFINE_TRACE_FN(name, reg, unreg)
-#define DEFINE_TRACE(name)
-#define EXPORT_TRACEPOINT_SYMBOL_GPL(name)
-#define EXPORT_TRACEPOINT_SYMBOL(name)
-
+#define DEFINE_TRACE_FN			DEFINE_TRACE_FN_NOP
+#define DECLARE_TRACE			DECLARE_TRACE_NOP
+#define DEFINE_TRACE			DEFINE_TRACE_NOP
+#define EXPORT_TRACEPOINT_SYMBOL_GPL	EXPORT_TRACEPOINT_SYMBOL_GPL_NOP
+#define EXPORT_TRACEPOINT_SYMBOL	EXPORT_TRACEPOINT_SYMBOL_NOP
+  
 static inline void tracepoint_update_probe_range(struct tracepoint *begin,
 	struct tracepoint *end)
 { }

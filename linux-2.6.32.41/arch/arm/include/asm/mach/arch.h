@@ -41,6 +41,7 @@ struct machine_desc {
 	void			(*init_irq)(void);
 	struct sys_timer	*timer;		/* system tick timer	*/
 	void			(*init_machine)(void);
+	int			(*probe_dt)(unsigned long root);
 };
 
 /*
@@ -56,5 +57,14 @@ static const struct machine_desc __mach_desc_##_type	\
 
 #define MACHINE_END				\
 };
+
+#define MACH_TYPE_DT	0xffffffff
+
+#define DT_MACHINE_START(_name, _namestr)		\
+static const struct machine_desc __mach_desc_##_name	\
+ __used							\
+ __attribute__((__section__(".arch.info.init"))) = {	\
+	.nr		= MACH_TYPE_DT,			\
+	.name		= _namestr,
 
 #endif

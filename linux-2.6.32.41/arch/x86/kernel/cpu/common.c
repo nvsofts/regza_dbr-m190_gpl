@@ -1045,6 +1045,7 @@ unsigned long kernel_eflags;
  * debugging, no special alignment required.
  */
 DEFINE_PER_CPU(struct orig_ist, orig_ist);
+EXPORT_PER_CPU_SYMBOL_GPL(orig_ist);
 
 #else	/* CONFIG_X86_64 */
 
