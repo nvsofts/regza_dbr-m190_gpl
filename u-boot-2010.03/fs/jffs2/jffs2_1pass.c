@@ -166,6 +166,7 @@ static struct part_info *current_part;
 #define NAND_CACHE_PAGES 16
 #endif
 #define NAND_CACHE_SIZE (NAND_CACHE_PAGES*NAND_PAGE_SIZE)
+#define NAND_CACHE_MASK (~(NAND_CACHE_SIZE-1))
 
 static u8* nand_cache = NULL;
 static u32 nand_cache_off = (u32)-1;
@@ -180,7 +181,7 @@ static int read_nand_cached(u32 off, u32 size, u_char *buf)
 	while (bytes_read < size) {
 		if ((off + bytes_read < nand_cache_off) ||
 		    (off + bytes_read >= nand_cache_off+NAND_CACHE_SIZE)) {
-			nand_cache_off = (off + bytes_read) & NAND_PAGE_MASK;
+			nand_cache_off = (off + bytes_read) & NAND_CACHE_MASK;
 			if (!nand_cache) {
 				/* This memory never gets freed but 'cause
 				   it's a bootloader, nobody cares */
@@ -403,6 +404,11 @@ static inline void *get_fl_mem(u32 off, u32 size, void *ext_buf)
 	case MTD_DEV_TYPE_NOR:
 		return get_fl_mem_nor(off, size, ext_buf);
 		break;
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+	case MTD_DEV_TYPE_SPI:
+		return get_fl_mem_nor(off, size, ext_buf);
+		break;
+#endif
 #endif
 #if defined(CONFIG_JFFS2_NAND) && defined(CONFIG_CMD_NAND)
 	case MTD_DEV_TYPE_NAND:
@@ -430,6 +436,11 @@ static inline void *get_node_mem(u32 off, void *ext_buf)
 	case MTD_DEV_TYPE_NOR:
 		return get_node_mem_nor(off, ext_buf);
 		break;
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+	case MTD_DEV_TYPE_SPI:
+		return get_node_mem_nor(off, ext_buf);
+		break;
+#endif
 #endif
 #if defined(CONFIG_JFFS2_NAND) && \
     defined(CONFIG_CMD_NAND)

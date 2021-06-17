@@ -1248,6 +1248,10 @@ int do_i2c(cmd_tbl_t * cmdtp, int flag, int argc, char *argv[])
 	argc--;
 	argv++;
 
+	if (argc == 0) {
+		cmd_usage(cmdtp);
+		return 0;
+	}
 #if defined(CONFIG_I2C_MUX)
 	if (!strncmp(argv[0], "bu", 2))
 		return do_i2c_add_bus(cmdtp, flag, argc, argv);
@@ -1298,7 +1302,11 @@ U_BOOT_CMD(
 #endif  /* CONFIG_I2C_MULTI_BUS */
 	"i2c md chip address[.0, .1, .2] [# of objects] - read from I2C device\n"
 	"i2c mm chip address[.0, .1, .2] - write to I2C device (auto-incrementing)\n"
+#ifdef CONFIG_TOSHIBA_BOARDS
+	"i2c mw chip address[.0, .1, .2] value count - write to I2C device (fill)\n"
+#else
 	"i2c mw chip address[.0, .1, .2] value [count] - write to I2C device (fill)\n"
+#endif
 	"i2c nm chip address[.0, .1, .2] - write to I2C device (constant address)\n"
 	"i2c crc32 chip address[.0, .1, .2] count - compute CRC32 checksum\n"
 	"i2c probe - show devices on the I2C bus\n"

@@ -293,7 +293,7 @@ __LIBS := $(subst $(obj),,$(LIBS)) $(subst $(obj),,$(LIBBOARD))
 #########################################################################
 
 # Always append ALL so that arch config.mk's can add custom ones
-ALL += $(obj)u-boot.srec $(obj)u-boot.bin $(obj)System.map $(U_BOOT_NAND) $(U_BOOT_ONENAND)
+ALL += $(obj)u-boot.srec $(obj)u-boot~.srec $(obj)u-boot.bin $(obj)System.map $(U_BOOT_NAND) $(U_BOOT_ONENAND)
 
 all:		$(ALL)
 
@@ -303,7 +303,10 @@ $(obj)u-boot.hex:	$(obj)u-boot
 $(obj)u-boot.srec:	$(obj)u-boot
 		$(OBJCOPY) -O srec $< $@
 
-$(obj)u-boot.bin:	$(obj)u-boot
+$(obj)u-boot~.srec:	$(obj)u-boot.bin
+		$(OBJCOPY) -I binary -O srec --adjust-vma=0x00000000 --srec-forceS3 $< $@
+
+$(obj)u-boot.bin:	$(obj)u-boot ${CONFIG_DTB_IMAGE} ${CONFIG_APL_IMAGE} ${CONFIG_APL2_IMAGE}
 		$(OBJCOPY) ${OBJCFLAGS} -O binary $< $@
 
 $(obj)u-boot.ldr:	$(obj)u-boot
@@ -384,13 +387,13 @@ $(U_BOOT_ONENAND):	$(ONENAND_IPL) $(obj)u-boot.bin
 		cat $(ONENAND_BIN) $(obj)u-boot.bin > $(obj)u-boot-onenand.bin
 
 $(VERSION_FILE):
-		@( printf '#define U_BOOT_VERSION "U-Boot %s%s"\n' "$(U_BOOT_VERSION)" \
-		 '$(shell $(TOPDIR)/tools/setlocalversion $(TOPDIR))' ) > $@.tmp
+		@( printf '#define U_BOOT_VERSION "U-Boot %s%s%s"\n' "$(U_BOOT_VERSION)" \
+		 '$(shell $(TOPDIR)/tools/setlocalversion $(TOPDIR))' "$(VERSION_SUFFIX)") > $@.tmp
 		@cmp -s $@ $@.tmp && rm -f $@.tmp || mv -f $@.tmp $@
 
 $(TIMESTAMP_FILE):
-		@date +'#define U_BOOT_DATE "%b %d %C%y"' > $@
-		@date +'#define U_BOOT_TIME "%T"' >> $@
+		@LANG=C date +'#define U_BOOT_DATE "%b %d %C%y"' > $@
+		@LANG=C date +'#define U_BOOT_TIME "%T"' >> $@
 
 gdbtools:
 		$(MAKE) -C tools/gdb all || exit 1
@@ -3183,6 +3186,277 @@ omap3_zoom2_config :	unconfig
 
 smdkc100_config:	unconfig
 	@$(MKCONFIG) $(@:_config=) arm arm_cortexa8 smdkc100 samsung s5pc1xx
+
+xtract_tc90431eva = $(subst _spiboot,,$(subst _config,,$1))
+
+tc90431eva_spiboot_config \
+tc90431eva_config :	unconfig
+	@mkdir -p $(obj)include
+	@[ -z "$(SRC_DEBUG)" ] || \
+		{ echo "#define CONFIG_SOURCE_CODE_DEBUG"  >>$(obj)include/config.h ; \
+		  $(XECHO) "... with source code debug option" ; \
+		}
+	@[ -z "$(findstring _spiboot,$@)" ] || \
+		{ echo "#define CONFIG_SYS_MONITOR_BASE 0xb0000000"  >>$(obj)include/config.h ; \
+		  $(XECHO) "... with SPI Boot" ; \
+		}
+	@$(MKCONFIG) -a $(call xtract_tc90431eva,$@) arm arm_cortexa9 tc90431eva toshiba tc90431
+
+xtract_tc90431_protojp = $(subst _protojp2,_protojp,$(subst _ram,,$(subst _spiboot,,$(subst _config,,$1))))
+
+tc90431_protojp2_ram_config \
+tc90431_protojp2_config \
+tc90431_protojp_ram_config \
+tc90431_protojp_spiboot_config \
+tc90431_protojp_config : unconfig
+	@mkdir -p $(obj)include
+	@{ echo "#define CONFIG_ES1_WORKAROUND"  >>$(obj)include/config.h ; \
+	  $(XECHO) "... define ES1 WORKAROUND" ; \
+	}
+	@[ -z "$(findstring _ram,$@)" ] || \
+		{ echo "#define CONFIG_NO_SDRAM_INIT"  >>$(obj)include/config.h ; \
+		  $(XECHO) "... with No SDRAM Init" ; \
+		}
+	@[ -z "$(findstring _spiboot,$@)" ] || \
+		{ echo "#define CONFIG_SYS_MONITOR_BASE 0xb0000000"  >>$(obj)include/config.h ; \
+		  $(XECHO) "... with SPI Boot" ; \
+		}
+	@[ -z "$(findstring _protojp2,$@)" ] || \
+		{ echo "#define CONFIG_TC90431_PROTOJP2"  >>$(obj)include/config.h ; \
+		  $(XECHO) "... define PROTOJP2" ; \
+		}
+	@echo "#define CONFIG_APPL_ENTRY_ADDR (CONFIG_SYS_MONITOR_BASE + 0x6E000)" >>$(obj)include/config.h
+	@echo "#define CONFIG_APPL2_ENTRY_ADDR (CONFIG_SYS_MONITOR_BASE + 0x7D000)" >>$(obj)include/config.h
+	@echo "#define CONFIG_UCOMAPPL_ENTRY_ADDR (CONFIG_SYS_MONITOR_BASE + 0x6D000)" >>$(obj)include/config.h
+	@echo "#define CONFIG_FDT_ENV_ADDR (CONFIG_SYS_MONITOR_BASE + 0xD0000)" >>$(obj)include/config.h
+	@echo "#define CONFIG_FDT_LOAD_ADDR (0x40000100)" >>$(obj)include/config.h
+	@echo "#define CONFIG_FDT_LOAD_SIZE (0x00003F00)" >>$(obj)include/config.h
+ifeq ($(BUILD),ship)
+	@echo "#define CONFIG_TC90431_SHIPMENTMODE" >>$(obj)include/config.h
+	@echo "#define CONFIG_ENV_IS_NOWHERE" >>$(obj)include/config.h
+	@echo "#define CONFIG_SYS_NO_FLASH" >>$(obj)include/config.h
+endif
+	@$(MKCONFIG) -a $(call xtract_tc90431_protojp,$@) arm arm_cortexa9 tc90431_protojp toshiba tc90431
+ifeq ($(BUILD),ship)
+	@echo "VERSION_SUFFIX = -s" >> $(obj)include/config.mk
+endif
+
+
+xtract_tc90431_eu11a = $(subst _eu11as,_eu11a, \
+			$(subst _e2,, \
+			$(subst _s1,, $(subst _ram,,$(subst _spiboot,,$(subst _config,,$1))))))
+
+tc90431_eu11a_s1_ram_config \
+tc90431_eu11a_s1_spiboot_config \
+tc90431_eu11a_s1_config \
+tc90431_eu11a_ram_config \
+tc90431_eu11as_config \
+tc90431_eu11as_e2_config \
+tc90431_eu11a_config : unconfig
+	@mkdir -p $(obj)include
+	@if [ "$(findstring _s1,$@)" ] ; then \
+		echo "#define CONFIG_TC90431_EU11A_S1"  >>$(obj)include/config.h ; \
+		echo "#define CONFIG_ES1_WORKAROUND"  >>$(obj)include/config.h ; \
+		$(XECHO) "... define CONFIG_TC90431_EU11A_S1" ; \
+		$(XECHO) "... define ES1 WORKAROUND" ; \
+	else \
+		echo "#define CONFIG_SYS_MONITOR_BASE 0xb0000000"  >>$(obj)include/config.h ; \
+	fi
+	@[ -z "$(findstring _ram,$@)" ] || \
+		{ echo "#define CONFIG_NO_SDRAM_INIT"  >>$(obj)include/config.h ; \
+		  $(XECHO) "... with No SDRAM Init" ; \
+		}
+	@[ -z "$(findstring _spiboot,$@)" ] || \
+		{ echo "#define CONFIG_SYS_MONITOR_BASE 0xb0000000"  >>$(obj)include/config.h ; \
+		  $(XECHO) "... with SPI Boot" ; \
+		}
+	@if [ "$(findstring eu11as_,$@)" ] ; then \
+		echo "#define CONFIG_NO_SDRAM_INIT" >>$(obj)include/config.h ; \
+		echo "#define CONFIG_NO_GPIO_INIT" >>$(obj)include/config.h ; \
+		echo "#define CONFIG_NO_SPIC_INIT" >>$(obj)include/config.h ; \
+		echo "#define CONFIG_CMD_TCBOOT_USEMAC" >>$(obj)include/config.h ; \
+		echo "#define CONFIG_APPL_ENTRY_ADDR (TEXT_BASE + 0xb9000)" >>$(obj)include/config.h ; \
+		echo "#define CONFIG_UCOMAPPL_ENTRY_ADDR (TEXT_BASE + 0xbb000)" >>$(obj)include/config.h ; \
+		echo "#define CONFIG_APPL2_ENTRY_ADDR (TEXT_BASE + 0xbd000)" >>$(obj)include/config.h ; \
+		echo "#define CONFIG_FDT_ENV_ADDR (TEXT_BASE + 0xbf000)" >>$(obj)include/config.h ; \
+	else \
+		echo "#define CONFIG_APPL_ENTRY_ADDR (CONFIG_SYS_MONITOR_BASE + 0x6E000)" >>$(obj)include/config.h ; \
+		echo "#define CONFIG_APPL2_ENTRY_ADDR (CONFIG_SYS_MONITOR_BASE + 0x7D000)" >>$(obj)include/config.h ; \
+		echo "#define CONFIG_UCOMAPPL_ENTRY_ADDR (CONFIG_SYS_MONITOR_BASE + 0x6D000)" >>$(obj)include/config.h ; \
+		echo "#define CONFIG_FDT_ENV_ADDR (CONFIG_SYS_MONITOR_BASE + 0xD0000)" >>$(obj)include/config.h ; \
+	fi
+	@[ -z "$(findstring _e2_,$@)" ] || \
+		{ echo "#define CONFIG_TC90431_EU11A_E2"  >>$(obj)include/config.h ; \
+		  $(XECHO) "... define E2" ; \
+		}
+	@echo "#define CONFIG_FDT_LOAD_ADDR (0x40000100)" >>$(obj)include/config.h
+	@echo "#define CONFIG_FDT_LOAD_SIZE (0x00003F00)" >>$(obj)include/config.h
+ifeq ($(BUILD),ship)
+	@echo "#define CONFIG_TC90431_SHIPMENTMODE" >>$(obj)include/config.h
+	@echo "#define CONFIG_ENV_IS_NOWHERE" >>$(obj)include/config.h
+	@echo "#define CONFIG_SYS_NO_FLASH" >>$(obj)include/config.h
+endif
+	@$(MKCONFIG) -a $(call xtract_tc90431_eu11a,$@) arm arm_cortexa9 tc90431_eu11a toshiba tc90431
+ifeq ($(BUILD),ship)
+	@echo "VERSION_SUFFIX = -s" >> $(obj)include/config.mk
+endif
+
+
+xtract_tc90431_jp11a = $(subst _jp11as,_jp11a, \
+			$(subst _d1,, $(subst _f1,, $(subst _f2,, \
+			$(subst _s1,, $(subst _s2,, $(subst _r1,, \
+			$(subst _o1,, $(subst _o2,, $(subst _o3,, $(subst _o4,, $(subst _o5,, \
+			$(subst _c1,, $(subst _b1,, $(subst _b2,, $(subst _a0,, $(subst _a1,, \
+			$(subst _ram,,$(subst _spiboot,,$(subst _config,,$1))))))))))))))))))))
+
+tc90431_jp11a_d1_ram_config \
+tc90431_jp11a_d1_config \
+tc90431_jp11a_f1_ram_config \
+tc90431_jp11a_f1_config \
+tc90431_jp11a_f2_ram_config \
+tc90431_jp11a_f2_config \
+tc90431_jp11a_s1_ram_config \
+tc90431_jp11a_s1_config \
+tc90431_jp11a_s2_ram_config \
+tc90431_jp11a_s2_config \
+tc90431_jp11a_o1_ram_config \
+tc90431_jp11a_o1_config \
+tc90431_jp11a_o2_ram_config \
+tc90431_jp11a_o2_config \
+tc90431_jp11a_o3_ram_config \
+tc90431_jp11a_o3_config \
+tc90431_jp11a_o4_ram_config \
+tc90431_jp11a_o4_config \
+tc90431_jp11as_o5_config \
+tc90431_jp11a_r1_ram_config \
+tc90431_jp11a_r1_config \
+tc90431_jp11a_c1_ram_config \
+tc90431_jp11a_c1_config \
+tc90431_jp11a_b1_ram_config \
+tc90431_jp11a_b1_config \
+tc90431_jp11a_b2_ram_config \
+tc90431_jp11a_b2_config \
+tc90431_jp11a_a1_ram_config \
+tc90431_jp11a_a1_config \
+tc90431_jp11a_a0_ram_config \
+tc90431_jp11a_a0_config : unconfig
+	@mkdir -p $(obj)include
+	@{ echo "#define CONFIG_ES1_WORKAROUND"  >>$(obj)include/config.h ; \
+	  $(XECHO) "... define ES1 WORKAROUND" ; \
+	}
+	@[ -z "$(findstring _d1_,$@)" ] || \
+		{ echo "#define CONFIG_TC90431_JP11A_D1"  >>$(obj)include/config.h ; \
+		  $(XECHO) "... define D1" ; \
+		  echo "#define CONFIG_SYS_MONITOR_BASE 0xb0000000"  >>$(obj)include/config.h ; \
+		  $(XECHO) "... with SPI Boot" ; \
+		}
+	@[ -z "$(findstring _f1_,$@)" ] || \
+		{ echo "#define CONFIG_TC90431_JP11A_F1"  >>$(obj)include/config.h ; \
+		  $(XECHO) "... define F1" ; \
+		  echo "#define CONFIG_SYS_MONITOR_BASE 0xb0000000"  >>$(obj)include/config.h ; \
+		  $(XECHO) "... with SPI Boot" ; \
+		}
+	@[ -z "$(findstring _f2_,$@)" ] || \
+		{ echo "#define CONFIG_TC90431_JP11A_F2"  >>$(obj)include/config.h ; \
+		  $(XECHO) "... define F2" ; \
+		  echo "#define CONFIG_SYS_MONITOR_BASE 0xb0000000"  >>$(obj)include/config.h ; \
+		  $(XECHO) "... with SPI Boot" ; \
+		}
+	@[ -z "$(findstring _s1_,$@)" ] || \
+		{ echo "#define CONFIG_TC90431_JP11A_S1"  >>$(obj)include/config.h ; \
+		  $(XECHO) "... define S1" ; \
+		}
+	@[ -z "$(findstring _s2_,$@)" ] || \
+		{ echo "#define CONFIG_TC90431_JP11A_S2"  >>$(obj)include/config.h ; \
+		  $(XECHO) "... define S2" ; \
+		  echo "#define CONFIG_SYS_MONITOR_BASE 0xb0000000"  >>$(obj)include/config.h ; \
+		  $(XECHO) "... with SPI Boot" ; \
+		}
+	@[ -z "$(findstring _ram,$@)" ] || \
+		{ echo "#define CONFIG_NO_SDRAM_INIT"  >>$(obj)include/config.h ; \
+		  $(XECHO) "... with No SDRAM Init" ; \
+		}
+	@[ -z "$(findstring _spiboot,$@)" ] || \
+		{ echo "#define CONFIG_SYS_MONITOR_BASE 0xb0000000"  >>$(obj)include/config.h ; \
+		  $(XECHO) "... with SPI Boot" ; \
+		}
+	@[ -z "$(findstring _o1_,$@)" ] || \
+		{ echo "#define CONFIG_TC90431_JP11A_O1"  >>$(obj)include/config.h ; \
+		  $(XECHO) "... define O1" ; \
+		}
+	@[ -z "$(findstring _o2_,$@)" ] || \
+		{ echo "#define CONFIG_TC90431_JP11A_O2"  >>$(obj)include/config.h ; \
+		  $(XECHO) "... define O2" ; \
+		}
+	@[ -z "$(findstring _o3_,$@)" ] || \
+		{ echo "#define CONFIG_TC90431_JP11A_O3"  >>$(obj)include/config.h ; \
+		  $(XECHO) "... define O3" ; \
+		}
+	@[ -z "$(findstring _o4_,$@)" ] || \
+		{ echo "#define CONFIG_TC90431_JP11A_O4"  >>$(obj)include/config.h ; \
+		  $(XECHO) "... define O4" ; \
+		  echo "#define CONFIG_SYS_MONITOR_BASE 0xb0000000"  >>$(obj)include/config.h ; \
+		  $(XECHO) "... with SPI Boot" ; \
+		}
+	@[ -z "$(findstring _o5_,$@)" ] || \
+		{ echo "#define CONFIG_TC90431_JP11A_O5"  >>$(obj)include/config.h ; \
+		  $(XECHO) "... define O5" ; \
+		  echo "#define CONFIG_SYS_MONITOR_BASE 0xb0000000"  >>$(obj)include/config.h ; \
+		  $(XECHO) "... with SPI Boot" ; \
+		}
+	@[ -z "$(findstring _r1_,$@)" ] || \
+		{ echo "#define CONFIG_TC90431_JP11A_R1"  >>$(obj)include/config.h ; \
+		  $(XECHO) "... define R1" ; \
+		}
+	@[ -z "$(findstring _c1_,$@)" ] || \
+		{ echo "#define CONFIG_TC90431_JP11A_C1"  >>$(obj)include/config.h ; \
+		  $(XECHO) "... define C1" ; \
+		}
+	@[ -z "$(findstring _b1_,$@)" ] || \
+		{ echo "#define CONFIG_TC90431_JP11A_B1"  >>$(obj)include/config.h ; \
+		  $(XECHO) "... define B1" ; \
+		}
+	@[ -z "$(findstring _b2_,$@)" ] || \
+		{ echo "#define CONFIG_TC90431_JP11A_B2"  >>$(obj)include/config.h ; \
+		  $(XECHO) "... define B2" ; \
+		  echo "#define CONFIG_SYS_MONITOR_BASE 0xb0000000"  >>$(obj)include/config.h ; \
+		  $(XECHO) "... with SPI Boot" ; \
+		}
+	@[ -z "$(findstring _a0_,$@)" ] || \
+		{ echo "#define CONFIG_TC90431_JP11A_A0"  >>$(obj)include/config.h ; \
+		  $(XECHO) "... define A0 " ; \
+		}
+	@[ -z "$(findstring _a1_,$@)" ] || \
+		{ echo "#define CONFIG_TC90431_JP11A_A1"  >>$(obj)include/config.h ; \
+		  $(XECHO) "... define A1 " ; \
+		}
+	@if [ "$(findstring jp11as_,$@)" ] ; then \
+		echo "#define CONFIG_NO_SDRAM_INIT" >>$(obj)include/config.h ; \
+		echo "#define CONFIG_NO_GPIO_INIT" >>$(obj)include/config.h ; \
+		echo "#define CONFIG_NO_SPIC_INIT" >>$(obj)include/config.h ; \
+		echo "#define CONFIG_CMD_TCBOOT_USEMAC" >>$(obj)include/config.h ; \
+		echo "#define CONFIG_APPL_ENTRY_ADDR (TEXT_BASE + 0xb9000)" >>$(obj)include/config.h ; \
+		echo "#define CONFIG_UCOMAPPL_ENTRY_ADDR (TEXT_BASE + 0xbb000)" >>$(obj)include/config.h ; \
+		echo "#define CONFIG_APPL2_ENTRY_ADDR (TEXT_BASE + 0xbd000)" >>$(obj)include/config.h ; \
+		echo "#define CONFIG_FDT_ENV_ADDR (TEXT_BASE + 0xbf000)" >>$(obj)include/config.h ; \
+	else \
+		echo "#define CONFIG_APPL_ENTRY_ADDR (CONFIG_SYS_MONITOR_BASE + 0x6E000)" >>$(obj)include/config.h ; \
+		echo "#define CONFIG_APPL2_ENTRY_ADDR (CONFIG_SYS_MONITOR_BASE + 0x7D000)" >>$(obj)include/config.h ; \
+		echo "#define CONFIG_UCOMAPPL_ENTRY_ADDR (CONFIG_SYS_MONITOR_BASE + 0x6D000)" >>$(obj)include/config.h ; \
+		echo "#define CONFIG_FDT_ENV_ADDR (CONFIG_SYS_MONITOR_BASE + 0xD0000)" >>$(obj)include/config.h ; \
+	fi
+	@echo "#define CONFIG_FDT_LOAD_ADDR (0x40000100)" >>$(obj)include/config.h
+	@echo "#define CONFIG_FDT_LOAD_SIZE (0x00003F00)" >>$(obj)include/config.h
+ifeq ($(BUILD),ship)
+	@echo "#define CONFIG_TC90431_SHIPMENTMODE" >>$(obj)include/config.h
+	@echo "#define CONFIG_ENV_IS_NOWHERE" >>$(obj)include/config.h
+	@echo "#define CONFIG_SYS_NO_FLASH" >>$(obj)include/config.h
+endif
+	@$(MKCONFIG) -a $(call xtract_tc90431_jp11a,$@) arm arm_cortexa9 tc90431_jp11a toshiba tc90431
+ifeq ($(BUILD),ship)
+	@echo "VERSION_SUFFIX = -s" >> $(obj)include/config.mk
+endif
+
 
 #########################################################################
 ## XScale Systems

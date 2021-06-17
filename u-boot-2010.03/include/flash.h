@@ -25,6 +25,14 @@
 #define _FLASH_H_
 
 #ifndef CONFIG_SYS_NO_FLASH
+
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+#include <spi_flash.h>
+#ifndef CONFIG_SYS_FLASH_CFI
+#error "*** CONFIG_SYS_FLASH_CFI not defined ***"
+#endif
+#endif
+
 /*-----------------------------------------------------------------------
  * FLASH Info: contains chip specific data, per FLASH bank
  */
@@ -55,6 +63,18 @@ typedef struct {
 	ulong   addr_unlock1;		/* unlock address 1 for AMD flash roms  */
 	ulong   addr_unlock2;		/* unlock address 2 for AMD flash roms  */
 	const char *name;		/* human-readable name	                */
+#ifdef CONFIG_TC90431
+	int     rburst_size;
+	int     t_EHEL;
+	int     t_PACC;
+	int     t_AVAV;
+	int     t_WLWH;
+	int     (*option)(u32 flag, int banknum, void *param);
+#define TC90431_NORC_SET	0x1
+#endif
+#endif
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+	struct spi_flash *spifl;	/* spi flash interface	                */
 #endif
 } flash_info_t;
 
@@ -109,6 +129,11 @@ extern int write_buff (flash_info_t *info, uchar *src, ulong addr, ulong cnt);
 extern int cfi_mtd_init(void);
 #endif
 
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+/* drivers/mtd/spi/spi_flash.c */
+extern int flash_detect_spi(flash_info_t *);
+#endif
+
 /* board/?/flash.c */
 #if defined(CONFIG_SYS_FLASH_PROTECTION)
 extern int flash_real_protect(flash_info_t *info, long sector, int prot);
@@ -124,6 +149,11 @@ extern int jedec_flash_match(flash_info_t *info, ulong base);
 
 #if defined(CONFIG_SYS_FLASH_CFI)
 extern flash_info_t *flash_get_info(ulong base);
+#endif
+
+#ifdef CONFIG_TOSHIBA_BOARDS
+extern int board_flash_get_kind(int banknum);
+extern void flash_configure_init(void);
 #endif
 
 /*-----------------------------------------------------------------------
@@ -487,6 +517,9 @@ extern flash_info_t *flash_get_info(ulong base);
 #define FLASH_MAN_SHARP 0x00500000
 #define FLASH_MAN_ATM	0x00600000
 #define FLASH_MAN_CFI	0x01000000
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+#define FLASH_MAN_SPI	0x02000000
+#endif
 
 
 #define FLASH_TYPEMASK	0x0000FFFF	/* extract FLASH type	information	*/

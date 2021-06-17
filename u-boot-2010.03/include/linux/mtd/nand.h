@@ -181,13 +181,21 @@ typedef enum {
 	(NAND_NO_PADDING | NAND_CACHEPRG | NAND_COPYBACK)
 
 /* Macros to identify the above */
+#ifdef CONFIG_TC90431_NANDC
+#define NAND_CANAUTOINCR(chip)	0 
+#else
 #define NAND_CANAUTOINCR(chip) (!(chip->options & NAND_NO_AUTOINCR))
+#endif
 #define NAND_MUST_PAD(chip) (!(chip->options & NAND_NO_PADDING))
 #define NAND_HAS_CACHEPROG(chip) ((chip->options & NAND_CACHEPRG))
 #define NAND_HAS_COPYBACK(chip) ((chip->options & NAND_COPYBACK))
 /* Large page NAND with SOFT_ECC should support subpage reads */
+#ifdef CONFIG_TC90431_NANDC
+#define NAND_SUBPAGE_READ(chip) 0
+#else
 #define NAND_SUBPAGE_READ(chip) ((chip->ecc.mode == NAND_ECC_SOFT) \
 					&& (chip->page_shift > 9))
+#endif
 
 /* Mask to zero out the chip options, which come from the id table */
 #define NAND_CHIPOPTIONS_MSK	(0x0000ffff & ~NAND_NO_AUTOINCR)
@@ -424,6 +432,9 @@ struct nand_chip {
 	struct nand_bbt_descr	*badblock_pattern;
 
 	void		*priv;
+	
+	int 		man_id;
+	int		dev_id;
 };
 
 /*

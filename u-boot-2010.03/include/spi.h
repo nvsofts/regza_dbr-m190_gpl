@@ -60,6 +60,17 @@
 struct spi_slave {
 	unsigned int	bus;
 	unsigned int	cs;
+#ifdef CONFIG_TC90431_SPI
+	unsigned int	max_hz;
+	unsigned int	deassert_time;
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+	unsigned int	flag;
+#define DEVICE_PROBE_DONE	0x1
+#define DIRECT_INIT_DONE	0x2
+	unsigned int	max_map_read_hz;
+	void *		device_data;
+#endif
+#endif
 };
 
 /*-----------------------------------------------------------------------

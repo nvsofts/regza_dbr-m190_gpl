@@ -27,6 +27,10 @@
 #define WINBOND_ID_W25X16		0x3015
 #define WINBOND_ID_W25X32		0x3016
 #define WINBOND_ID_W25X64		0x3017
+#ifdef CONFIG_TC90431_SPI
+#define WINBOND_ID_W25Q32V		0x4016
+#define WINBOND_ID_W25Q128BV		0x4018
+#endif
 
 #define WINBOND_SR_WIP		(1 << 0)	/* Write-in-Progress */
 
@@ -36,8 +40,18 @@ struct winbond_spi_flash_params {
 	uint8_t		l2_page_size;
 	uint16_t	pages_per_sector;
 	uint16_t	sectors_per_block;
+#ifdef CONFIG_TC90431_SPI
+	uint16_t	nr_blocks;
+#else
 	uint8_t		nr_blocks;
+#endif
 	const char	*name;
+#ifdef CONFIG_TC90431_SPI
+	uint32_t	max_hz;
+	uint32_t	deassert_time;
+	uint32_t	hp_read_op;
+	uint32_t	max_hp_hz;
+#endif
 };
 
 /* spi_flash needs to be first so upper layers can free() it */
@@ -52,7 +66,128 @@ to_winbond_spi_flash(struct spi_flash *flash)
 	return container_of(flash, struct winbond_spi_flash, flash);
 }
 
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+static int winbond_wait_ready(struct spi_flash *flash, unsigned long timeout);
+
+#define CMD_W25_HPM		0xa3	/* High Performance Mode */
+#define CMD_W25_RDSR2		0x35	/* Read Status2 Register */
+#define WINBOND_SR2_QE		(1 << 1)	/* Quad Mode Enable */
+
+static int winbond_quad_enable(struct spi_flash *flash)
+{
+	int ret;
+	u8 cmd[4], status[2];
+	struct winbond_spi_flash *stm = to_winbond_spi_flash(flash);
+
+	ret = spi_claim_bus(flash->spi);
+	if (ret) {
+		debug("SF: Unable to claim SPI bus\n");
+		return ret;
+	}
+
+	cmd[0] = CMD_W25_WREN;
+	ret = spi_flash_cmd(flash->spi, cmd[0], NULL, 0);
+	if (ret)
+		return -1;
+
+	if ((strcmp(stm->flash.name, "W25Q32V")) == 0) {
+		cmd[0] = CMD_W25_HPM;
+		cmd[1] = 0xff;
+		cmd[2] = 0xff;
+		cmd[3] = 0xff;
+		ret = spi_flash_cmd_write(flash->spi, cmd, 4, NULL, 0);
+		if (ret)
+			return -1;
+	}
+
+	cmd[0] = CMD_W25_RDSR;
+	ret = spi_flash_cmd(flash->spi, cmd[0], &status[0], sizeof(status[0]));
+	if (ret)
+		return -1;
+
+	cmd[0] = CMD_W25_RDSR2;
+	ret = spi_flash_cmd(flash->spi, cmd[0], &status[1], sizeof(status[1]));
+	if (ret)
+		return -1;
+
+	cmd[0] = CMD_W25_WREN;
+	ret = spi_flash_cmd(flash->spi, cmd[0], NULL, 0);
+	if (ret)
+		return -1;
+
+	status[1] |= WINBOND_SR2_QE;
+	cmd[0] = CMD_W25_WRSR;
+	ret = spi_flash_cmd_write(flash->spi, &cmd[0], 1, status, sizeof(status));
+	if (ret)
+		return -1;
+
+	ret = winbond_wait_ready(flash, SPI_FLASH_PROG_TIMEOUT);
+	if (ret)
+		return -1;
+
+	spi_release_bus(flash->spi);
+
+	return 0;
+}
+
+static int winbond_option (u32 flag, void *param)
+{
+	if (flag & SF_SET_MAP_READ) {
+		int ret;
+		struct spi_flash *flash = param;
+		struct winbond_spi_flash *stm = to_winbond_spi_flash(flash);
+
+		switch (flash->read_op) {
+		case OPCODE_FAST_READ_SINGLE:
+			flash->spi->max_map_read_hz = stm->params->max_hz;
+			flash->dummy_count = 1;
+			break;
+		case OPCODE_FAST_READ_DUAL_IO:
+			flash->spi->max_map_read_hz = stm->params->max_hp_hz;
+			flash->dummy_count = 1;
+			break;
+		case OPCODE_FAST_READ_QUAD_IO:
+			flash->spi->max_map_read_hz = stm->params->max_hp_hz;
+			flash->dummy_count = 3;
+			ret = winbond_quad_enable(flash);
+			if (ret)
+			return -1;
+			break;
+		default:
+			return -1;
+		}
+	}
+	return 0;
+}
+#endif
+
 static const struct winbond_spi_flash_params winbond_spi_flash_table[] = {
+#ifdef CONFIG_TC90431_SPI
+	{
+		.id			= WINBOND_ID_W25Q32V,
+		.l2_page_size		= 8,
+		.pages_per_sector	= 16,
+		.sectors_per_block	= 16,
+		.nr_blocks		= 64,
+		.name			= "W25Q32V",
+		.max_hz			= 80000000,
+		.deassert_time		= 50,
+		.hp_read_op		= OPCODE_FAST_READ_QUAD_IO,
+		.max_hp_hz		= 80000000,
+	},
+	{
+		.id			= WINBOND_ID_W25Q128BV,
+		.l2_page_size		= 8,
+		.pages_per_sector	= 16,
+		.sectors_per_block	= 16,
+		.nr_blocks		= 256,
+		.name			= "W25Q128BV",
+		.max_hz			= 104000000,
+		.deassert_time		= 50,
+		.hp_read_op		= OPCODE_FAST_READ_QUAD_IO,
+		.max_hp_hz		= 80000000,
+	},
+#else
 	{
 		.id			= WINBOND_ID_W25X16,
 		.l2_page_size		= 8,
@@ -77,6 +212,7 @@ static const struct winbond_spi_flash_params winbond_spi_flash_table[] = {
 		.nr_blocks		= 128,
 		.name			= "W25X64",
 	},
+#endif
 };
 
 static int winbond_wait_ready(struct spi_flash *flash, unsigned long timeout)
@@ -87,6 +223,18 @@ static int winbond_wait_ready(struct spi_flash *flash, unsigned long timeout)
 	u8 status;
 	u8 cmd[4] = { CMD_W25_RDSR, 0xff, 0xff, 0xff };
 
+#ifdef CONFIG_TC90431_SPI
+        timebase = get_timer(0);
+        do {
+                ret = spi_flash_cmd(spi, cmd[0], &status, sizeof(status));
+                if (ret)
+                        return -1;
+
+                if ((status & WINBOND_SR_WIP) == 0)
+                        break;
+
+        } while (get_timer(timebase) < timeout);
+#else
 	ret = spi_xfer(spi, 32, &cmd[0], NULL, SPI_XFER_BEGIN);
 	if (ret) {
 		debug("SF: Failed to send command %02x: %d\n", cmd, ret);
@@ -107,6 +255,7 @@ static int winbond_wait_ready(struct spi_flash *flash, unsigned long timeout)
 	} while (get_timer(timebase) < timeout);
 
 	spi_xfer(spi, 0, NULL, NULL, SPI_XFER_END);
+#endif
 
 	if ((status & WINBOND_SR_WIP) == 0)
 		return 0;
@@ -146,12 +295,52 @@ static int winbond_read_fast(struct spi_flash *flash,
 {
 	struct winbond_spi_flash *stm = to_winbond_spi_flash(flash);
 	u8 cmd[5];
+#ifdef CONFIG_TC90431_SPI
+        unsigned long page_addr;
+        unsigned long page_size;
+        unsigned long byte_addr;
+        size_t chunk_len;
+        size_t actual;
+        int ret;
 
+        page_size = (1 << stm->params->l2_page_size);
+        page_addr = offset / page_size;
+        byte_addr = offset % page_size;
+
+        ret = 0;
+        for (actual = 0; actual < len; actual += chunk_len) {
+                chunk_len = min(len - actual, page_size - byte_addr);
+
+                cmd[0] = CMD_READ_ARRAY_FAST;
+                cmd[1] = page_addr >> 8;
+                cmd[2] = page_addr;
+                cmd[3] = byte_addr;
+                cmd[4] = 0x00;
+
+                debug
+                    ("READ: 0x%p => cmd = { 0x%02x 0x%02x%02x%02x%02x } chunk_len = %d\n",
+                     buf + actual, cmd[0], cmd[1], cmd[2], cmd[3], cmd[4], chunk_len);
+
+                ret = spi_flash_read_common(flash, cmd, sizeof(cmd), buf + actual, chunk_len);
+                if (ret < 0) {
+                        debug("SF: Winbond Read failed\n");
+                        break;
+                }
+
+                page_addr++;
+                byte_addr = 0;
+        }
+
+        debug("SF: Winbond: Successfully Read %u bytes @ 0x%x\n", len, offset);
+
+        return ret;
+#else
 	cmd[0] = CMD_READ_ARRAY_FAST;
 	winbond_build_address(stm, cmd + 1, offset);
 	cmd[4] = 0x00;
 
 	return spi_flash_read_common(flash, cmd, sizeof(cmd), buf, len);
+#endif
 }
 
 static int winbond_write(struct spi_flash *flash,
@@ -237,7 +426,12 @@ int winbond_erase(struct spi_flash *flash, u32 offset, size_t len)
 	 */
 
 	page_shift = stm->params->l2_page_size;
+#ifdef CONFIG_TC90431_SPI
+	sector_size = (1 << page_shift) * stm->params->pages_per_sector
+		* stm->params->sectors_per_block;
+#else
 	sector_size = (1 << page_shift) * stm->params->pages_per_sector;
+#endif
 
 	if (offset % sector_size || len % sector_size) {
 		debug("SF: Erase offset/length not multiple of sector size\n");
@@ -245,7 +439,11 @@ int winbond_erase(struct spi_flash *flash, u32 offset, size_t len)
 	}
 
 	len /= sector_size;
+#ifdef CONFIG_TC90431_SPI
+	cmd[0] = CMD_W25_BE;
+#else
 	cmd[0] = CMD_W25_SE;
+#endif
 
 	ret = spi_claim_bus(flash->spi);
 	if (ret) {
@@ -255,8 +453,13 @@ int winbond_erase(struct spi_flash *flash, u32 offset, size_t len)
 
 	for (actual = 0; actual < len; actual++) {
 		winbond_build_address(stm, &cmd[1], offset + actual * sector_size);
+#ifdef CONFIG_TC90431_SPI
+		debug("Erase: %02x %02x %02x %02x\n",
+				cmd[0], cmd[1], cmd[2], cmd[3]);
+#else
 		printf("Erase: %02x %02x %02x %02x\n",
 				cmd[0], cmd[1], cmd[2], cmd[3]);
+#endif
 
 		ret = spi_flash_cmd(flash->spi, CMD_W25_WREN, NULL, 0);
 		if (ret < 0) {
@@ -324,6 +527,23 @@ struct spi_flash *spi_flash_probe_winbond(struct spi_slave *spi, u8 *idcode)
 	stm->flash.size = page_size * params->pages_per_sector
 				* params->sectors_per_block
 				* params->nr_blocks;
+
+#ifdef CONFIG_TC90431_SPI
+	spi->max_hz = params->max_hz;
+	spi->deassert_time = params->deassert_time;
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+	stm->flash.sector_size = page_size * params->pages_per_sector
+		* params->sectors_per_block;
+	stm->flash.option = winbond_option;
+#ifdef CONFIG_SYS_FLASH_SPI_HIGH_PERFORMANCE_READ
+	spi->max_map_read_hz = params->max_hp_hz;
+	stm->flash.read_op = params->hp_read_op;
+#else
+	spi->max_map_read_hz = params->max_hz;
+	stm->flash.read_op = OPCODE_FAST_READ_SINGLE;
+#endif
+#endif
+#endif
 
 	debug("SF: Detected %s with page size %u, total %u bytes\n",
 			params->name, page_size, stm->flash.size);

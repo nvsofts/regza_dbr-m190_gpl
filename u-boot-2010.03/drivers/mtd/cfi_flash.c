@@ -463,6 +463,110 @@ static int flash_isset (flash_info_t * info, flash_sect_t sect,
 	return retval;
 }
 
+#ifdef CONFIG_TC90431
+static int flash_is_busy_write (flash_info_t * info, flash_sect_t sect, void *dstaddr, cfiword_t cfiword)
+{
+	u16 tmp;
+	int retval;
+	switch (info->portwidth) {
+	case FLASH_CFI_16BIT:
+		tmp = flash_read16(dstaddr);
+		retval = tmp != cfiword.w;
+		/* safety check */
+		if (retval == 0) {
+			tmp = flash_read16(dstaddr);
+			tmp = flash_read16(dstaddr);
+			retval = tmp != cfiword.w;
+		}
+		break;
+	default:
+		retval = 0;
+	}
+	debug ("flash_is_busy_write: %d\n", retval);
+	return retval;
+}
+
+static int flash_is_busy_erase (flash_info_t * info, flash_sect_t sect, uint offset)
+{
+	u16 tmp;
+	void *addr;
+	int retval;
+	addr = flash_map (info, sect, offset);
+	switch (info->portwidth) {
+	case FLASH_CFI_16BIT:
+		tmp = flash_read16(addr);
+		retval = (tmp & AMD_STATUS_DATA) == 0;
+		/* safety check */
+		if (retval == 0) {
+			tmp = flash_read16(addr);
+			tmp = flash_read16(addr);
+			retval = tmp != 0xffff;
+		}
+		break;
+	default:
+		retval = 0;
+	}
+	flash_unmap(info, sect, offset, addr);
+	debug ("flash_is_busy_erase: %d\n", retval);
+	return retval;
+}
+
+static int flash_write_status_check (flash_info_t * info, flash_sect_t sector,
+				     void *dstaddr, ulong tout,
+				     cfiword_t cfiword)
+{
+	ulong start;
+
+#if CONFIG_SYS_HZ != 1000
+	if ((ulong)CONFIG_SYS_HZ > 100000)
+		tout *= (ulong)CONFIG_SYS_HZ / 1000;  /* for a big HZ, avoid overflow */
+	else
+		tout = DIV_ROUND_UP(tout * (ulong)CONFIG_SYS_HZ, 1000);
+#endif
+
+	/* Wait for command completion */
+	start = get_timer (0);
+	while (flash_is_busy_write (info, sector, dstaddr, cfiword)) {
+		if (get_timer (start) > tout) {
+			printf ("Flash write timeout at address %lx data %lx\n",
+				info->start[sector],
+				flash_read_long (info, sector, 0));
+			flash_write_cmd (info, sector, 0, info->cmd_reset);
+			return ERR_TIMOUT;
+		}
+		udelay (1);		/* also triggers watchdog */
+	}
+	return ERR_OK;
+}
+
+static int flash_erase_status_check (flash_info_t * info, flash_sect_t sector,
+				     ulong tout)
+{
+	ulong start;
+
+#if CONFIG_SYS_HZ != 1000
+	if ((ulong)CONFIG_SYS_HZ > 100000)
+		tout *= (ulong)CONFIG_SYS_HZ / 1000;  /* for a big HZ, avoid overflow */
+	else
+		tout = DIV_ROUND_UP(tout * (ulong)CONFIG_SYS_HZ, 1000);
+#endif
+
+	/* Wait for command completion */
+	start = get_timer (0);
+	while (flash_is_busy_erase (info, sector, 0)) {
+		if (get_timer (start) > tout) {
+			printf ("Flash erase timeout at address %lx data %lx\n",
+				info->start[sector],
+				flash_read_long (info, sector, 0));
+			flash_write_cmd (info, sector, 0, info->cmd_reset);
+			return ERR_TIMOUT;
+		}
+		udelay (1);		/* also triggers watchdog */
+	}
+	return ERR_OK;
+}
+#else
+
 /*-----------------------------------------------------------------------
  */
 static int flash_toggle (flash_info_t * info, flash_sect_t sect,
@@ -604,6 +708,7 @@ static int flash_full_status_check (flash_info_t * info, flash_sect_t sector,
 	}
 	return retcode;
 }
+#endif
 
 /*-----------------------------------------------------------------------
  */
@@ -752,7 +857,11 @@ static int flash_write_cfiword (flash_info_t * info, ulong dest,
 	if (!sect_found)
 		sect = find_sector (info, dest);
 
+#ifdef CONFIG_TC90431
+	return flash_write_status_check (info, sect, dstaddr, info->write_tout, cword);
+#else
 	return flash_full_status_check (info, sect, info->write_tout, "write");
+#endif
 }
 
 #ifdef CONFIG_SYS_FLASH_USE_BUFFER_WRITE
@@ -939,10 +1048,12 @@ int flash_erase (flash_info_t * info, int s_first, int s_last)
 	int prot;
 	flash_sect_t sect;
 
+#ifndef CONFIG_SYS_FLASH_PHYS_MAP_SPI
 	if (info->flash_id != FLASH_MAN_CFI) {
 		puts ("Can't erase unknown flash type - aborted\n");
 		return 1;
 	}
+#endif
 	if ((s_first < 0) || (s_first > s_last)) {
 		puts ("- no sectors to erase\n");
 		return 1;
@@ -961,9 +1072,21 @@ int flash_erase (flash_info_t * info, int s_first, int s_last)
 		putc ('\n');
 	}
 
-
+#ifdef CONFIG_TOSHIBA_BOARDS
+	perftime ();
+#endif
 	for (sect = s_first; sect <= s_last; sect++) {
 		if (info->protect[sect] == 0) { /* not protected */
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+        		if (info->flash_id == FLASH_MAN_SPI) {
+                		u32 offset = info->spifl->sector_size * sect;
+                		u32 len = info->spifl->sector_size;
+                		if (spi_flash_erase (info->spifl, offset, len)) {
+					printf ("Flash erase error at address %lx\n", info->start[sect]);
+					rcode = 1;
+				}
+        		} else {
+#endif
 			switch (info->vendor) {
 			case CFI_CMDSET_INTEL_PROG_REGIONS:
 			case CFI_CMDSET_INTEL_STANDARD:
@@ -993,6 +1116,13 @@ int flash_erase (flash_info_t * info, int s_first, int s_last)
 				flash_unlock_seq (info, 0);
 				flash_write_cmd (info, sect, 0,
 						AMD_CMD_ERASE_SECTOR);
+#ifdef CONFIG_ES1_WORKAROUND
+{
+	unsigned long timebase = get_timer (0);
+
+	while (get_timer (timebase) < CONFIG_SYS_MHZ);
+}
+#endif
 				break;
 #endif
 			default:
@@ -1001,13 +1131,24 @@ int flash_erase (flash_info_t * info, int s_first, int s_last)
 				break;
 			}
 
+#ifdef CONFIG_TC90431
+			if (flash_erase_status_check
+			    (info, sect, info->erase_blk_tout)) {
+#else
 			if (flash_full_status_check
 			    (info, sect, info->erase_blk_tout, "erase")) {
+#endif
 				rcode = 1;
 			} else if (flash_verbose)
 				putc ('.');
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+		}
+#endif
 		}
 	}
+#ifdef CONFIG_TOSHIBA_BOARDS
+	perftime ();
+#endif
 
 	if (flash_verbose)
 		puts (" done\n");
@@ -1020,6 +1161,16 @@ int flash_erase (flash_info_t * info, int s_first, int s_last)
 void flash_print_info (flash_info_t * info)
 {
 	int i;
+
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+	if (info->flash_id == FLASH_MAN_SPI) {
+	printf ("%s SPI FLASH", info->name);
+	printf ("  Size: %ld MB in %d Sectors\n",
+		info->size >> 20, info->sector_count);
+		/* goto display sector information */
+		goto sector_info;
+	}
+#endif
 
 	if (info->flash_id != FLASH_MAN_CFI) {
 		puts ("missing or unknown FLASH type\n");
@@ -1076,6 +1227,9 @@ void flash_print_info (flash_info_t * info)
 		info->buffer_size);
 	}
 
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+sector_info:
+#endif
 	puts ("\n  Sector Start Addresses:");
 	for (i = 0; i < info->sector_count; ++i) {
 		if ((i % 5) == 0)
@@ -1263,6 +1417,13 @@ int flash_real_protect (flash_info_t * info, long sector, int prot)
 {
 	int retcode = 0;
 
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+	/* not support SPI Flash hardware protection */
+	if (info->flash_id == FLASH_MAN_SPI) {
+		return 1;
+	}
+#endif
+
 	switch (info->vendor) {
 		case CFI_CMDSET_INTEL_PROG_REGIONS:
 		case CFI_CMDSET_INTEL_STANDARD:
@@ -1436,7 +1597,11 @@ static void cmdset_amd_read_jedec_ids(flash_info_t *info)
 		manuId = flash_read_uchar (info,
 			bankId | FLASH_OFFSET_MANUFACTURER_ID);
 	}
+#ifdef CONFIG_TOSHIBA_BOARDS
+	info->manufacturer_id = bankId | manuId;
+#else
 	info->manufacturer_id = manuId;
+#endif
 
 	switch (info->chipwidth){
 	case FLASH_CFI_8BIT:
@@ -1501,6 +1666,9 @@ static void flash_read_jedec_ids (flash_info_t * info)
 static int flash_detect_legacy(phys_addr_t base, int banknum)
 {
 	flash_info_t *info = &flash_info[banknum];
+#ifdef CONFIG_TOSHIBA_BOARDS
+	int detected = 0;
+#endif
 
 	if (board_flash_get_legacy(base, banknum, info)) {
 		/* board code may have filled info completely. If not, we
@@ -1532,12 +1700,32 @@ static int flash_detect_legacy(phys_addr_t base, int banknum)
 						info->device_id,
 						info->device_id2);
 				if (jedec_flash_match(info, info->start[0]))
+#ifdef CONFIG_TOSHIBA_BOARDS
+				{
+					detected = 1;
 					break;
+				}
+#else
+					break;
+#endif
 				else
 					unmap_physmem((void *)info->start[0],
 						      MAP_NOCACHE);
 			}
 		}
+
+#ifdef CONFIG_TOSHIBA_BOARDS
+		if (!detected) {
+			debug("%s: Not Detected\n", __func__);
+			return 0; /* use CFI */
+		}
+
+#ifdef CONFIG_TC90431_EVA
+		if (info->option) {
+			info->option(TC90431_NORC_SET, banknum, info);
+		}
+#endif
+#endif
 
 		switch(info->vendor) {
 		case CFI_CMDSET_INTEL_PROG_REGIONS:
@@ -1743,7 +1931,37 @@ ulong flash_get_size (phys_addr_t base, int banknum)
 
 	info->start[0] = (ulong)map_physmem(base, info->portwidth, MAP_NOCACHE);
 
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+	if ((board_flash_get_kind (banknum) == FLASH_KIND_SPI)
+		&& flash_detect_spi (info)) {
+		sect_cnt = 0;
+		sector = base;
+		erase_region_size = info->spifl->sector_size;
+		erase_region_count = info->spifl->size / erase_region_size;
+		debug ("erase_region_count = %d erase_region_size = %d\n",
+			erase_region_count, erase_region_size);
+		for (i = 0; i < erase_region_count; i++) {
+			if (sect_cnt >= CONFIG_SYS_MAX_FLASH_SECT) {
+				printf("ERROR: too many flash sectors\n");
+				break;
+			}
+			info->start[sect_cnt] =
+					(ulong)map_physmem(sector,
+							   erase_region_size,
+							   MAP_NOCACHE);
+			sector += erase_region_size;
+			info->protect[sect_cnt] = 0;
+			sect_cnt++;
+		}
+		info->name = info->spifl->name;
+		info->sector_count = sect_cnt;
+		info->size = info->spifl->size;
+		info->flash_id = FLASH_MAN_SPI;
+	} else if ((board_flash_get_kind (banknum) == FLASH_KIND_NOR)
+		&& flash_detect_cfi (info, &qry)) {
+#else
 	if (flash_detect_cfi (info, &qry)) {
+#endif
 		info->vendor = le16_to_cpu(qry.p_id);
 		info->ext_addr = le16_to_cpu(qry.p_adr);
 		num_erase_regions = qry.num_erase_regions;
@@ -1784,6 +2002,9 @@ ulong flash_get_size (phys_addr_t base, int banknum)
 		/* Do manufacturer-specific fixups */
 		switch (info->manufacturer_id) {
 		case 0x0001:
+#ifdef CONFIG_USE_TOSHIBA_CFI_FLASH
+		case 0x0098:
+#endif
 			flash_fixup_amd(info, &qry);
 			break;
 		case 0x001f:

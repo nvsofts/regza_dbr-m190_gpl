@@ -1216,8 +1216,10 @@ int boot_relocate_fdt (struct lmb *lmb, ulong bootmap_base,
 		/* position on a 4K boundary before the alloc_current */
 		/* Pad the FDT by a specified amount */
 		of_len = *of_size + CONFIG_SYS_FDT_PAD;
+#if defined(CONFIG_LMB)
 		of_start = (unsigned long)lmb_alloc_base(lmb, of_len, 0x1000,
 				(CONFIG_SYS_BOOTMAPSZ + bootmap_base));
+#endif/*CONFIG_LMB*/
 
 		if (of_start == 0) {
 			puts("device tree - allocation error\n");
@@ -1243,7 +1245,9 @@ int boot_relocate_fdt (struct lmb *lmb, ulong bootmap_base,
 	} else {
 		*of_flat_tree = fdt_blob;
 		of_len = (CONFIG_SYS_BOOTMAPSZ + bootmap_base) - (ulong)fdt_blob;
+#if defined(CONFIG_LMB)
 		lmb_reserve(lmb, (ulong)fdt_blob, of_len);
+#endif/*CONFIG_LMB*/
 		fdt_set_totalsize(*of_flat_tree, of_len);
 
 		*of_size = of_len;
@@ -1564,7 +1568,7 @@ int boot_get_fdt (int flag, int argc, char *argv[], bootm_headers_t *images,
 	}
 
 	*of_flat_tree = fdt_blob;
-	*of_size = be32_to_cpu (fdt_totalsize (fdt_blob));
+	*of_size = fdt_totalsize (fdt_blob);
 	debug ("   of_flat_tree at 0x%08lx size 0x%08lx\n",
 			(ulong)*of_flat_tree, *of_size);
 

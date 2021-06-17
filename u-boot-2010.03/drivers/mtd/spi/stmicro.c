@@ -54,6 +54,13 @@
 #define STM_ID_M25P80		0x14
 #define STM_ID_M25P128		0x18
 
+#ifdef CONFIG_TC90431_SPI
+#define STM_WORD_ID_M25PX32	0x7116
+#define STM_WORD_ID_M25P80	0x2014
+#define STM_WORD_ID_M25P128	0x2018
+#define STM_WORD_ID_N25Q128	0xba18
+#endif
+
 #define STMICRO_SR_WIP		(1 << 0)	/* Write-in-Progress */
 
 struct stmicro_spi_flash_params {
@@ -62,6 +69,13 @@ struct stmicro_spi_flash_params {
 	u16 pages_per_sector;
 	u16 nr_sectors;
 	const char *name;
+#ifdef CONFIG_TC90431_SPI
+	u16 wordid;
+	u32 max_hz;
+	u32 deassert_time;
+	u32 hp_read_op;
+	u32 max_hp_hz;
+#endif
 };
 
 /* spi_flash needs to be first so upper layers can free() it */
@@ -76,7 +90,81 @@ static inline struct stmicro_spi_flash *to_stmicro_spi_flash(struct spi_flash
 	return container_of(flash, struct stmicro_spi_flash, flash);
 }
 
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+static int stmicro_option (u32 flag, void *param)
+{
+	if (flag & SF_SET_MAP_READ) {
+		struct spi_flash *flash = param;
+		struct stmicro_spi_flash *stm = to_stmicro_spi_flash(flash);
+
+		switch (flash->read_op) {
+		case OPCODE_FAST_READ_SINGLE:
+			flash->spi->max_map_read_hz = stm->params->max_hz;
+			flash->dummy_count = 1;
+			break;
+		case OPCODE_FAST_READ_DUAL_OUTPUT:
+			flash->spi->max_map_read_hz = stm->params->max_hp_hz;
+			flash->dummy_count = 1;
+			break;
+		case OPCODE_FAST_READ_QUAD_IO:
+			flash->spi->max_map_read_hz = stm->params->max_hp_hz;
+			flash->dummy_count = 3;
+			break;
+		default:
+			return -1;
+		}
+	}
+	return 0;
+}
+#endif
+
 static const struct stmicro_spi_flash_params stmicro_spi_flash_table[] = {
+#ifdef CONFIG_TC90431_SPI
+	{
+		.wordid = STM_WORD_ID_M25PX32,
+		.page_size = 256,
+		.pages_per_sector = 256,
+		.nr_sectors = 64,
+		.name = "M25PX32",
+		.max_hz = 75000000,
+		.deassert_time = 80,
+		.hp_read_op = OPCODE_FAST_READ_DUAL_OUTPUT,
+		.max_hp_hz = 75000000,
+	},
+	{
+		.wordid = STM_WORD_ID_M25P80,
+		.page_size = 256,
+		.pages_per_sector = 256,
+		.nr_sectors = 16,
+		.name = "M25P80",
+		.max_hz = 75000000,
+		.deassert_time = 100,
+		.hp_read_op = OPCODE_FAST_READ_SINGLE,
+		.max_hp_hz = 75000000,
+	},
+	{
+		.wordid = STM_WORD_ID_M25P128,
+		.page_size = 256,
+		.pages_per_sector = 1024,
+		.nr_sectors = 64,
+		.name = "M25P128",
+		.max_hz = 50000000,
+		.deassert_time = 100,
+		.hp_read_op = OPCODE_FAST_READ_SINGLE,
+		.max_hp_hz = 50000000,
+	},
+	{
+		.wordid = STM_WORD_ID_N25Q128,
+		.page_size = 256,
+		.pages_per_sector = 256,
+		.nr_sectors = 256,
+		.name = "N25Q128",
+		.max_hz = 108000000,
+		.deassert_time = 50,
+		.hp_read_op = OPCODE_FAST_READ_QUAD_IO,
+		.max_hp_hz = 108000000,
+	},
+#else
 	{
 		.idcode1 = STM_ID_M25P16,
 		.page_size = 256,
@@ -126,6 +214,7 @@ static const struct stmicro_spi_flash_params stmicro_spi_flash_table[] = {
 		.nr_sectors = 64,
 		.name = "M25P128",
 	},
+#endif
 };
 
 static int stmicro_wait_ready(struct spi_flash *flash, unsigned long timeout)
@@ -136,6 +225,18 @@ static int stmicro_wait_ready(struct spi_flash *flash, unsigned long timeout)
 	u8 cmd = CMD_M25PXX_RDSR;
 	u8 status;
 
+#ifdef CONFIG_TC90431_SPI
+        timebase = get_timer(0);
+        do {
+                ret = spi_flash_cmd(spi, cmd, &status, sizeof(status));
+                if (ret)
+                        return -1;
+
+                if ((status & STMICRO_SR_WIP) == 0)
+                        break;
+
+        } while (get_timer(timebase) < timeout);
+#else
 	ret = spi_xfer(spi, 8, &cmd, NULL, SPI_XFER_BEGIN);
 	if (ret) {
 		debug("SF: Failed to send command %02x: %d\n", cmd, ret);
@@ -154,6 +255,7 @@ static int stmicro_wait_ready(struct spi_flash *flash, unsigned long timeout)
 	} while (get_timer(timebase) < timeout);
 
 	spi_xfer(spi, 0, NULL, NULL, SPI_XFER_END);
+#endif
 
 	if ((status & STMICRO_SR_WIP) == 0)
 		return 0;
@@ -169,10 +271,47 @@ static int stmicro_read_fast(struct spi_flash *flash,
 	unsigned long page_addr;
 	unsigned long page_size;
 	u8 cmd[5];
+#ifdef CONFIG_TC90431_SPI
+        unsigned long byte_addr;
+        size_t chunk_len;
+        size_t actual;
+        int ret;
+#endif
 
 	page_size = stm->params->page_size;
 	page_addr = offset / page_size;
+#ifdef CONFIG_TC90431_SPI
+        byte_addr = offset % page_size;
 
+        ret = 0;
+        for (actual = 0; actual < len; actual += chunk_len) {
+                chunk_len = min(len - actual, page_size - byte_addr);
+
+                cmd[0] = CMD_READ_ARRAY_FAST;
+                cmd[1] = page_addr >> 8;
+                cmd[2] = page_addr;
+                cmd[3] = byte_addr;
+                cmd[4] = 0x00;
+
+                debug
+                    ("READ: 0x%p => cmd = { 0x%02x 0x%02x%02x%02x%02x } chunk_len = %d\n",
+                     buf + actual, cmd[0], cmd[1], cmd[2], cmd[3], cmd[4], chunk_len);
+
+                ret = spi_flash_read_common(flash, cmd, sizeof(cmd), buf + actual, chunk_len);
+                if (ret < 0) {
+                        debug("SF: STMICRO Read failed\n");
+                        break;
+                }
+
+                page_addr++;
+                byte_addr = 0;
+        }
+
+        debug("SF: STMICRO: Successfully Read %u bytes @ 0x%x\n",
+              len, offset);
+
+        return ret;
+#else
 	cmd[0] = CMD_READ_ARRAY_FAST;
 	cmd[1] = page_addr >> 8;
 	cmd[2] = page_addr;
@@ -180,6 +319,7 @@ static int stmicro_read_fast(struct spi_flash *flash,
 	cmd[4] = 0x00;
 
 	return spi_flash_read_common(flash, cmd, sizeof(cmd), buf, len);
+#endif
 }
 
 static int stmicro_write(struct spi_flash *flash,
@@ -318,13 +458,22 @@ struct spi_flash *spi_flash_probe_stmicro(struct spi_slave *spi, u8 * idcode)
 
 	for (i = 0; i < ARRAY_SIZE(stmicro_spi_flash_table); i++) {
 		params = &stmicro_spi_flash_table[i];
+#ifdef CONFIG_TC90431_SPI
+		if (params->wordid == ((idcode[1] << 8) | idcode[2])) {
+#else
 		if (params->idcode1 == idcode[2]) {
+#endif
 			break;
 		}
 	}
 
 	if (i == ARRAY_SIZE(stmicro_spi_flash_table)) {
+#ifdef CONFIG_TC90431_SPI
+		debug("SF: Unsupported STMicro ID %02x%02x\n",
+				 idcode[1], idcode[2]);
+#else
 		debug("SF: Unsupported STMicro ID %02x\n", idcode[1]);
+#endif
 		return NULL;
 	}
 
@@ -343,6 +492,22 @@ struct spi_flash *spi_flash_probe_stmicro(struct spi_slave *spi, u8 * idcode)
 	stm->flash.read = stmicro_read_fast;
 	stm->flash.size = params->page_size * params->pages_per_sector
 	    * params->nr_sectors;
+
+#ifdef CONFIG_TC90431_SPI
+	spi->max_hz = params->max_hz;
+	spi->deassert_time = params->deassert_time;
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+	stm->flash.sector_size = params->page_size * params->pages_per_sector;
+	stm->flash.option = stmicro_option;
+#ifdef CONFIG_SYS_FLASH_SPI_HIGH_PERFORMANCE_READ
+	spi->max_map_read_hz = params->max_hp_hz;
+	stm->flash.read_op = params->hp_read_op;
+#else
+	spi->max_map_read_hz = params->max_hz;
+	stm->flash.read_op = OPCODE_FAST_READ_SINGLE;
+#endif
+#endif
+#endif
 
 	debug("SF: Detected %s with page size %u, total %u bytes\n",
 	      params->name, params->page_size, stm->flash.size);

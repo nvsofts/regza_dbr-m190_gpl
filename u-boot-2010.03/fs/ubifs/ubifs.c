@@ -28,6 +28,51 @@
 
 DECLARE_GLOBAL_DATA_PTR;
 
+#ifdef CONFIG_UBIFS_REUSE_LEBMEM
+#ifndef CONFIG_CMD_TCBOOT
+#error CONFIG_UBIFS_REUSE_LEBMEM requires CONFIG_CMD_TCBOOT
+#endif/*CONFIG_CMD_TCBOOT*/
+
+extern int check_reuseblock(void);
+extern void* assign_reuseblock(unsigned int size);
+
+static int use_reserve_lebmem = 0;
+
+void ubifs_initialize_lebmem(void)
+{
+	if (check_reuseblock())
+		use_reserve_lebmem = 1;
+	else
+		use_reserve_lebmem = 0;
+	return;
+}
+void* ubifs_alloc_lebmem(unsigned int size)
+{
+	void* mem;
+
+	if (use_reserve_lebmem == 0) {
+		void* p = malloc(size);
+		ubifs_msg("use malloc %lx = LEBMEM(%X)", (unsigned long)(p), size);
+		return p;
+	}
+
+	mem = assign_reuseblock(size);
+	if (mem == NULL) {
+		ubifs_msg("ERROR: out of reuseblock");
+		return NULL;
+	}
+	ubifs_msg("assign reuseblock : %08lX-%08lX", (unsigned long)(mem), (unsigned long)(mem) + size - 1);
+
+	return mem;
+}
+void ubifs_release_lebmem(void* p)
+{
+	if (use_reserve_lebmem == 0)
+		free(p);
+	return;
+}
+#endif/*CONFIG_UBIFS_REUSE_LEBMEM*/
+
 /* compress.c */
 
 /*
@@ -384,6 +429,7 @@ static unsigned long ubifs_findfile(struct super_block *sb, char *filename)
 	unsigned long root_inum = 1;
 	unsigned long inum;
 	int symlink_count = 0; /* Don't allow symlink recursion */
+	char link_name[64];
 
 	strcpy(fpath, filename);
 
@@ -415,12 +461,11 @@ static unsigned long ubifs_findfile(struct super_block *sb, char *filename)
 			return 0;
 		inode = ubifs_iget(sb, inum);
 
-		if (!inode)
+		if (IS_ERR(inode))
 			return 0;
 		ui = ubifs_inode(inode);
 
 		if ((inode->i_mode & S_IFMT) == S_IFLNK) {
-			char link_name[64];
 			char buf[128];
 
 			/* We have some sort of symlink recursion, bail out */
@@ -703,3 +748,34 @@ out:
 	ubi_close_volume(c->ubi);
 	return err;
 }
+
+#if defined(UBIFS_GETFILESIZE)
+int ubifs_getfilesize(char *filename)
+{
+	struct ubifs_info *c = ubifs_sb->s_fs_info;
+	unsigned long inum;
+	struct inode *inode;
+	int size;
+
+	c->ubi = ubi_open_volume(c->vi.ubi_num, c->vi.vol_id, UBI_READONLY);
+
+	inum = ubifs_findfile(ubifs_sb, filename);
+	if (inum == 0) {
+		ubi_close_volume(c->ubi);
+		return -1;
+	}
+
+	inode = ubifs_iget(ubifs_sb, inum);
+	if (IS_ERR(inode)) {
+		ubi_close_volume(c->ubi);
+		return -1;
+	}
+
+	size = (int)(inode->i_size);
+
+	ubifs_iput(inode);
+	ubi_close_volume(c->ubi);
+
+	return size;
+}
+#endif/*UBIFS_GETFILESIZE*/

@@ -11,6 +11,21 @@
 
 #include "spi_flash_internal.h"
 
+#ifdef CONFIG_TC90431_SPI
+/* AT25-specific commands */
+#define CMD_AT25_WREN		0x06	/* Write Enable */
+#define CMD_AT25_WRDI		0x04	/* Write Disable */
+#define CMD_AT25_RDSR		0x05	/* Read Status Register */
+#define CMD_AT25_WRSR		0x01	/* Write Status Register */
+#define CMD_AT25_READ		0x03	/* Read Data Bytes */
+#define CMD_AT25_FAST_READ	0x0b	/* Read Data Bytes at Higher Speed */
+#define CMD_AT25_PP		0x02	/* Page Program */
+#define CMD_AT25_BE		0x20	/* Block (4K) Erase */
+#define CMD_AT25_SE		0xd8	/* Sector (64K) Erase */
+
+#define ATMEL_SR_WIP		(1 << 0)	/* Write-in-Progress */
+#endif
+
 /* AT45-specific commands */
 #define CMD_AT45_READ_STATUS		0xd7
 #define CMD_AT45_ERASE_PAGE		0x81
@@ -38,6 +53,13 @@ struct atmel_spi_flash_params {
 	u8		blocks_per_sector;
 	u8		nr_sectors;
 	const char	*name;
+#ifdef CONFIG_TC90431_SPI
+	u8		idcode2;
+	u32		max_hz;
+	u32		deassert_time;
+	u32		hp_read_op;
+	u32		max_hp_hz;
+#endif
 };
 
 /* spi_flash needs to be first so upper layers can free() it */
@@ -52,7 +74,59 @@ to_atmel_spi_flash(struct spi_flash *flash)
 	return container_of(flash, struct atmel_spi_flash, flash);
 }
 
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+static int atmel_option (u32 flag, void *param)
+{
+	if (flag & SF_SET_MAP_READ) {
+		struct spi_flash *flash = param;
+		struct atmel_spi_flash *asf = to_atmel_spi_flash(flash);
+
+		switch (flash->read_op) {
+		case OPCODE_FAST_READ_SINGLE:
+			flash->spi->max_map_read_hz = asf->params->max_hz;
+			flash->dummy_count = 1;
+			break;
+		case OPCODE_FAST_READ_DUAL_OUTPUT:
+			flash->spi->max_map_read_hz = asf->params->max_hp_hz;
+			flash->dummy_count = 1;
+			break;
+		default:
+			return -1;
+		}
+	}
+	return 0;
+}
+#endif
+
 static const struct atmel_spi_flash_params atmel_spi_flash_table[] = {
+#ifdef CONFIG_TC90431_SPI
+	{
+		.idcode1		= 0x46,
+		.idcode2		= 0x02,
+		.l2_page_size		= 8,
+		.pages_per_block	= 16,
+		.blocks_per_sector	= 16,
+		.nr_sectors		= 32,
+		.name			= "AT25DF161",
+		.max_hz			= 85000000,
+		.deassert_time		= 50,
+		.hp_read_op		= OPCODE_FAST_READ_DUAL_OUTPUT,
+		.max_hp_hz		= 85000000,
+	},
+	{
+		.idcode1		= 0x45,
+		.idcode2		= 0x01,
+		.l2_page_size		= 8,
+		.pages_per_block	= 16,
+		.blocks_per_sector	= 16,
+		.nr_sectors		= 16,
+		.name			= "AT25DF081",
+		.max_hz			= 85000000,
+		.deassert_time		= 50,
+		.hp_read_op		= OPCODE_FAST_READ_DUAL_OUTPUT,
+		.max_hp_hz		= 85000000,
+	},
+#else
 	{
 		.idcode1		= 0x22,
 		.l2_page_size		= 8,
@@ -109,7 +183,254 @@ static const struct atmel_spi_flash_params atmel_spi_flash_table[] = {
 		.nr_sectors		= 32,
 		.name			= "AT45DB642D",
 	},
+#endif
 };
+
+#ifdef CONFIG_TC90431_SPI
+static int atmel_wait_ready(struct spi_flash *flash, unsigned long timeout)
+{
+	struct spi_slave *spi = flash->spi;
+	unsigned long timebase;
+	int ret;
+	u8 status;
+	u8 cmd[4] = { CMD_AT25_RDSR, 0xff, 0xff, 0xff };
+
+	timebase = get_timer(0);
+	do {
+		ret = spi_flash_cmd(spi, cmd[0], &status, sizeof(status));
+		if (ret)
+			return -1;
+
+		if ((status & ATMEL_SR_WIP) == 0)
+			break;
+
+	} while (get_timer(timebase) < timeout);
+
+	if ((status & ATMEL_SR_WIP) == 0)
+		return 0;
+
+	debug("SF: Timed out on command %02x: %d\n", cmd, ret);
+	/* Timed out */
+	return -1;
+}
+
+static void atmel_build_address(struct atmel_spi_flash *asf, u8 *cmd, u32 offset)
+{
+	unsigned long page_addr;
+	unsigned long byte_addr;
+	unsigned long page_size;
+	unsigned int page_shift;
+
+	/*
+	 * The "extra" space per page is the power-of-two page size
+	 * divided by 32.
+	 */
+	page_shift = asf->params->l2_page_size;
+	page_size = (1 << page_shift);
+	page_addr = offset / page_size;
+	byte_addr = offset % page_size;
+
+	cmd[0] = page_addr >> (16 - page_shift);
+	cmd[1] = page_addr << (page_shift - 8) | (byte_addr >> 8);
+	cmd[2] = byte_addr;
+}
+
+static int atmel_read_fast(struct spi_flash *flash,
+		u32 offset, size_t len, void *buf)
+{
+	struct atmel_spi_flash *asf = to_atmel_spi_flash(flash);
+	u8 cmd[5];
+	unsigned long page_addr;
+	unsigned long page_size;
+	unsigned long byte_addr;
+	size_t chunk_len;
+	size_t actual;
+	int ret;
+
+	page_size = (1 << asf->params->l2_page_size);
+	page_addr = offset / page_size;
+	byte_addr = offset % page_size;
+
+	ret = 0;
+	for (actual = 0; actual < len; actual += chunk_len) {
+		chunk_len = min(len - actual, page_size - byte_addr);
+
+		cmd[0] = CMD_READ_ARRAY_FAST;
+		cmd[1] = page_addr >> 8;
+		cmd[2] = page_addr;
+		cmd[3] = byte_addr;
+		cmd[4] = 0x00;
+
+		debug
+		     ("READ: 0x%p => cmd = { 0x%02x 0x%02x%02x%02x%02x } chunk_len = %d\n",
+		     buf + actual, cmd[0], cmd[1], cmd[2], cmd[3], cmd[4], chunk_len);
+
+		ret = spi_flash_read_common(flash, cmd, sizeof(cmd), buf + actual, chunk_len);
+		if (ret < 0) {
+			debug("SF: Atmel: Read failed\n");
+			break;
+		}
+
+		page_addr++;
+		byte_addr = 0;
+	}
+
+	debug("SF: Atmel: Successfully Read %u bytes @ 0x%x\n", len, offset);
+
+	return ret;
+}
+
+static int atmel_write(struct spi_flash *flash,
+		u32 offset, size_t len, const void *buf)
+{
+	struct atmel_spi_flash *asf = to_atmel_spi_flash(flash);
+	unsigned long page_addr;
+	unsigned long byte_addr;
+	unsigned long page_size;
+	unsigned int page_shift;
+	size_t chunk_len;
+	size_t actual;
+	int ret;
+	u8 cmd[4];
+
+	page_shift = asf->params->l2_page_size;
+	page_size = (1 << page_shift);
+	page_addr = offset / page_size;
+	byte_addr = offset % page_size;
+
+	ret = spi_claim_bus(flash->spi);
+	if (ret) {
+		debug("SF: Unable to claim SPI bus\n");
+		return ret;
+	}
+
+	for (actual = 0; actual < len; actual += chunk_len) {
+		chunk_len = min(len - actual, page_size - byte_addr);
+
+		cmd[0] = CMD_AT25_PP;
+		cmd[1] = page_addr >> (16 - page_shift);
+		cmd[2] = page_addr << (page_shift - 8) | (byte_addr >> 8);
+		cmd[3] = byte_addr;
+		debug("PP: 0x%p => cmd = { 0x%02x 0x%02x%02x%02x } chunk_len = %d\n",
+			buf + actual,
+			cmd[0], cmd[1], cmd[2], cmd[3], chunk_len);
+
+		ret = spi_flash_cmd(flash->spi, CMD_AT25_WREN, NULL, 0);
+		if (ret < 0) {
+			debug("SF: Enabling Write failed\n");
+			goto out;
+		}
+
+		ret = spi_flash_cmd_write(flash->spi, cmd, 4,
+			buf + actual, chunk_len);
+		if (ret < 0) {
+			debug("SF: Atmel Page Program failed\n");
+			goto out;
+		}
+
+		ret = atmel_wait_ready(flash, SPI_FLASH_PROG_TIMEOUT);
+		if (ret < 0) {
+			debug("SF: Atmel page programming timed out\n");
+			goto out;
+		}
+
+		page_addr++;
+		byte_addr = 0;
+	}
+
+	debug("SF: Atmel: Successfully programmed %u bytes @ 0x%x\n",
+		len, offset);
+	ret = 0;
+
+out:
+	spi_release_bus(flash->spi);
+	return ret;
+}
+
+static int atmel_erase(struct spi_flash *flash, u32 offset, size_t len)
+{
+	struct atmel_spi_flash *asf = to_atmel_spi_flash(flash);
+	unsigned long sector_size;
+	unsigned int page_shift;
+	size_t actual;
+	int ret;
+	u8 cmd[4];
+
+	page_shift = asf->params->l2_page_size;
+	sector_size = (1 << page_shift) * asf->params->pages_per_block
+			* asf->params->blocks_per_sector;
+
+	if (offset % sector_size || len % sector_size) {
+		debug("SF: Erase offset/length not multiple of sector size\n");
+		return -1;
+	}
+
+	len /= sector_size;
+	cmd[0] = CMD_AT25_SE;
+
+	ret = spi_claim_bus(flash->spi);
+	if (ret) {
+		debug("SF: Unable to claim SPI bus\n");
+		return ret;
+	}
+
+	for (actual = 0; actual < len; actual++) {
+		atmel_build_address(asf, &cmd[1], offset + actual * sector_size);
+
+		debug("Erase: %02x %02x %02x %02x\n",
+			cmd[0], cmd[1], cmd[2], cmd[3]);
+
+		ret = spi_flash_cmd(flash->spi, CMD_AT25_WREN, NULL, 0);
+		if (ret < 0) {
+			debug("SF: Enabling Write failed\n");
+			goto out;
+		}
+
+		ret = spi_flash_cmd_write(flash->spi, cmd, 4, NULL, 0);
+		if (ret < 0) {
+			debug("SF: Atmel sector erase failed\n");
+			goto out;
+		}
+
+		ret = atmel_wait_ready(flash, SPI_FLASH_PAGE_ERASE_TIMEOUT);
+		if (ret < 0) {
+			debug("SF: Atmel sector erase timed out\n");
+			goto out;
+		}
+	}
+
+	debug("SF: Atmel: Successfully erased %u bytes @ 0x%x\n",
+		len * sector_size, offset);
+	ret = 0;
+
+out:
+	spi_release_bus(flash->spi);
+	return ret;
+}
+
+static int atmel_unlock(struct spi_flash *flash)
+{
+	int ret;
+	u8 cmd, status;
+
+	ret = spi_flash_cmd(flash->spi, CMD_AT25_WREN, NULL, 0);
+	if (ret < 0) {
+		debug("SF: Enabling Write failed\n");
+		return ret;
+	}
+
+	cmd = CMD_AT25_WRSR;
+	status = 0;
+	ret = spi_flash_cmd_write(flash->spi, &cmd, 1, &status, 1);
+	if (ret)
+		debug("SF: Unable to set status byte\n");
+
+	debug("SF: Atmel: status = %x\n", spi_w8r8(flash->spi, CMD_AT25_RDSR));
+
+	return ret;
+}
+
+#else
 
 static int at45_wait_ready(struct spi_flash *flash, unsigned long timeout)
 {
@@ -463,20 +784,30 @@ out:
 	spi_release_bus(flash->spi);
 	return ret;
 }
+#endif
 
 struct spi_flash *spi_flash_probe_atmel(struct spi_slave *spi, u8 *idcode)
 {
 	const struct atmel_spi_flash_params *params;
 	unsigned long page_size;
+#ifndef CONFIG_TC90431_SPI
 	unsigned int family;
+#endif
 	struct atmel_spi_flash *asf;
 	unsigned int i;
+#ifndef CONFIG_TC90431_SPI
 	int ret;
 	u8 status;
+#endif
 
 	for (i = 0; i < ARRAY_SIZE(atmel_spi_flash_table); i++) {
 		params = &atmel_spi_flash_table[i];
+#ifdef CONFIG_TC90431_SPI
+		if (params->idcode1 == idcode[1] &&
+			params->idcode2 == idcode[2])
+#else
 		if (params->idcode1 == idcode[1])
+#endif
 			break;
 	}
 
@@ -496,9 +827,15 @@ struct spi_flash *spi_flash_probe_atmel(struct spi_slave *spi, u8 *idcode)
 	asf->flash.spi = spi;
 	asf->flash.name = params->name;
 
+#ifdef CONFIG_TC90431_SPI
+	asf->flash.read = atmel_read_fast;
+	asf->flash.write = atmel_write;
+	asf->flash.erase = atmel_erase;
+
 	/* Assuming power-of-two page size initially. */
 	page_size = 1 << params->l2_page_size;
 
+#else
 	family = idcode[1] >> 5;
 
 	switch (family) {
@@ -535,17 +872,39 @@ struct spi_flash *spi_flash_probe_atmel(struct spi_slave *spi, u8 *idcode)
 		debug("SF: Unsupported DataFlash family %u\n", family);
 		goto err;
 	}
+#endif
 
 	asf->flash.size = page_size * params->pages_per_block
 				* params->blocks_per_sector
 				* params->nr_sectors;
+
+#ifdef CONFIG_TC90431_SPI
+        spi->max_hz = params->max_hz;
+        spi->deassert_time = params->deassert_time;
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+        asf->flash.sector_size = page_size * params->pages_per_block
+		* params->blocks_per_sector;
+        asf->flash.option = atmel_option;
+#ifdef CONFIG_SYS_FLASH_SPI_HIGH_PERFORMANCE_READ
+        spi->max_map_read_hz = params->max_hp_hz;
+        asf->flash.read_op = params->hp_read_op;
+#else
+        spi->max_map_read_hz = params->max_hz;
+        asf->flash.read_op = OPCODE_FAST_READ_SINGLE;
+#endif
+#endif
+	/* Flash powers up read-only, so clear BP# bits */
+	atmel_unlock(&asf->flash);
+#endif
 
 	debug("SF: Detected %s with page size %lu, total %u bytes\n",
 			params->name, page_size, asf->flash.size);
 
 	return &asf->flash;
 
+#ifndef CONFIG_TC90431_SPI
 err:
 	free(asf);
 	return NULL;
+#endif
 }

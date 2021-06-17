@@ -23,6 +23,51 @@
 #include <ubi_uboot.h>
 #include "ubi.h"
 
+#ifdef CONFIG_UBI_REUSE_PEBMEM
+#ifndef CONFIG_CMD_TCBOOT
+#error CONFIG_UBI_REUSE_PEBMEM requires CONFIG_CMD_TCBOOT
+#endif/*CONFIG_CMD_TCBOOT*/
+
+extern int check_reuseblock(void);
+extern void* assign_reuseblock(unsigned int size);
+
+static int use_reserve_pebmem = 0;
+
+void ubi_initialize_pebmem(void)
+{
+	if (check_reuseblock())
+		use_reserve_pebmem = 1;
+	else
+		use_reserve_pebmem = 0;
+	return;
+}
+void* ubi_alloc_pebmem(unsigned int size)
+{
+	void* mem;
+
+	if (use_reserve_pebmem == 0) {
+		void* p = malloc(size);
+		ubi_msg("use malloc %lx = PEBMEM(%X)", (unsigned long)(p), size);
+		return p;
+	}
+
+	mem = assign_reuseblock(size);
+	if (mem == NULL) {
+		ubi_msg("ERROR: out of reuseblock");
+		return NULL;
+	}
+	ubi_msg("assign reuseblock : %08lX-%08lX", (unsigned long)(mem), (unsigned long)(mem) + size - 1);
+
+	return mem;
+}
+void ubi_release_pebmem(void* p)
+{
+	if (use_reserve_pebmem == 0)
+		free(p);
+	return;
+}
+#endif/*CONFIG_UBI_REUSE_PEBMEM*/
+
 /**
  * calc_data_len - calculate how much real data is stored in a buffer.
  * @ubi: UBI device description object

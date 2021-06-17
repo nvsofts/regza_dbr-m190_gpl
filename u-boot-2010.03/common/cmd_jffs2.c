@@ -166,7 +166,11 @@ extern int cramfs_info (struct part_info *info);
  */
 static int mtd_device_validate(u8 type, u8 num, u32 *size)
 {
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+	if ((type == MTD_DEV_TYPE_NOR) || (type == MTD_DEV_TYPE_SPI)) {
+#else
 	if (type == MTD_DEV_TYPE_NOR) {
+#endif
 #if defined(CONFIG_CMD_FLASH)
 		if (num < CONFIG_SYS_MAX_FLASH_BANKS) {
 			extern flash_info_t flash_info[];
@@ -223,6 +227,11 @@ static int mtd_id_parse(const char *id, const char **ret_id, u8 *dev_type, u8 *d
 	if (strncmp(p, "nand", 4) == 0) {
 		*dev_type = MTD_DEV_TYPE_NAND;
 		p += 4;
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+	} else if (strncmp(p, "spi", 3) == 0) {
+		*dev_type = MTD_DEV_TYPE_SPI;
+		p += 3;
+#endif
 	} else if (strncmp(p, "nor", 3) == 0) {
 		*dev_type = MTD_DEV_TYPE_NOR;
 		p += 3;
@@ -324,7 +333,12 @@ static inline u32 get_part_sector_size(struct mtdids *id, struct part_info *part
 {
 	if (id->type == MTD_DEV_TYPE_NAND)
 		return get_part_sector_size_nand(id);
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+	else if ((id->type == MTD_DEV_TYPE_NOR)
+		  || (id->type == MTD_DEV_TYPE_SPI)) {
+#else
 	else if (id->type == MTD_DEV_TYPE_NOR)
+#endif
 		return get_part_sector_size_nor(id, part);
 	else if (id->type == MTD_DEV_TYPE_ONENAND)
 		return get_part_sector_size_onenand();

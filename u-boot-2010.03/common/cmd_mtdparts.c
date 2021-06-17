@@ -1034,6 +1034,11 @@ int mtd_id_parse(const char *id, const char **ret_id, u8 *dev_type, u8 *dev_num)
 	if (strncmp(p, "nand", 4) == 0) {
 		*dev_type = MTD_DEV_TYPE_NAND;
 		p += 4;
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+	} else if (strncmp(p, "spi", 3) == 0) {
+		*dev_type = MTD_DEV_TYPE_SPI;
+		p += 3;
+#endif
 	} else if (strncmp(p, "nor", 3) == 0) {
 		*dev_type = MTD_DEV_TYPE_NOR;
 		p += 3;
@@ -1795,6 +1800,9 @@ int do_mtdparts(cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 		struct mtd_device *dev_tmp;
 		struct mtdids *id;
 		struct part_info *p;
+#ifdef CONFIG_TOSHIBA_BOARDS
+		const char *t;
+#endif
 
 		if (mtd_id_parse(argv[2], NULL, &type, &num) != 0)
 			return 1;
@@ -1818,7 +1826,12 @@ int do_mtdparts(cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 				id->mtd_id, argv[3], argv[4], argv[5] ? argv[5] : "");
 		DEBUGF("add tmpbuf: %s\n", tmpbuf);
 
+#ifdef CONFIG_TOSHIBA_BOARDS
+		t = tmpbuf;
+		if ((device_parse(t, &t, &dev) != 0) || (!dev))
+#else
 		if ((device_parse(tmpbuf, NULL, &dev) != 0) || (!dev))
+#endif
 			return 1;
 
 		DEBUGF("+ %s\t%d\t%s\n", MTD_DEV_TYPE(dev->id->type),
@@ -1871,7 +1884,11 @@ U_BOOT_CMD(
 	"    - delete all partitions\n"
 	"mtdparts del part-id\n"
 	"    - delete partition (e.g. part-id = nand0,1)\n"
+#ifdef CONFIG_TOSHIBA_BOARDS
+	"mtdparts add <mtd-dev> <size>[@<offset>] <name> [ro]\n"
+#else
 	"mtdparts add <mtd-dev> <size>[@<offset>] [<name>] [ro]\n"
+#endif
 	"    - add partition\n"
 	"mtdparts default\n"
 	"    - reset partition table to defaults\n\n"

@@ -39,6 +39,9 @@ extern ulong FIQ_STACK_START;	/* top of FIQ stack */
 /* cpu/.../cpu.c */
 int	cpu_init(void);
 int	cleanup_before_linux(void);
+#ifdef CONFIG_ARMCORTEXA9
+int	setup_after_linux(void);
+#endif
 
 /* cpu/.../arch/cpu.c */
 int	arch_cpu_init(void);

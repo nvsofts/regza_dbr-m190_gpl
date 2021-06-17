@@ -230,6 +230,9 @@ int usb_stor_scan(int mode)
 		usb_dev_desc[i].part_type = PART_TYPE_UNKNOWN;
 		usb_dev_desc[i].block_read = usb_stor_read;
 		usb_dev_desc[i].block_write = usb_stor_write;
+#ifdef CONFIG_TOSHIBA_BOARDS
+		usb_dev_desc[i].type = DEV_TYPE_UNKNOWN;
+#endif
 	}
 
 	usb_max_devs = 0;
@@ -888,7 +891,11 @@ static int usb_inquiry(ccb *srb, struct us_data *ss)
 		USB_STOR_PRINTF("inquiry returns %d\n", i);
 		if (i == 0)
 			break;
+#ifdef CONFIG_TOSHIBA_BOARDS
+	} while (--retry);
+#else
 	} while (retry--);
+#endif
 
 	if (!retry) {
 		printf("error in inquiry\n");

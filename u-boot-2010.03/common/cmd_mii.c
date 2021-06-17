@@ -462,3 +462,55 @@ U_BOOT_CMD(
 	"mii dump   <addr> <reg>        - pretty-print <addr> <reg> (0-5 only)\n"
 	"Addr and/or reg may be ranges, e.g. 2-7."
 );
+
+#ifndef CONFIG_TC90431_ETH_AUTONEG
+int do_eth_start (cmd_tbl_t * cmdtp, int flag, int argc, char *argv[])
+{
+	unsigned char	addr;
+	int		rcode = 0;
+	char		*devname;
+
+	addr = CONFIG_TC90431_PHY_ADDR;	
+
+	/* use current device */
+	devname = miiphy_get_current_dev();
+
+	/* phy reset */
+	if(miiphy_write (devname, addr, PHY_BMCR, 0x8000) != 0) {
+		printf("Error writing to the PHY addr=%02x reg=%02x\n",
+			addr, PHY_BMCR);
+		rcode = 1;
+	}
+	/* ANAR set */
+	if(miiphy_write (devname, addr, PHY_ANAR, 0x01E1) != 0) {
+		printf("Error writing to the PHY addr=%02x reg=%02x\n",
+			addr, PHY_ANAR);
+		rcode = 1;
+	}
+	
+	/* disable 1000M */
+	if(miiphy_write (devname, addr, PHY_1000BTCR, 0x0000) != 0) {
+		printf("Error writing to the PHY addr=%02x reg=%02x\n",
+			addr, PHY_1000BTCR);
+		rcode = 1;
+	}
+	
+	/* autoneg start */
+	if(miiphy_write (devname, addr, PHY_BMCR, 0x1200) != 0) {
+		printf("Error writing to the PHY addr=%02x reg=%02x\n",
+			addr, PHY_BMCR);
+		rcode = 1;
+	}
+	
+	
+	return rcode;
+
+}
+
+U_BOOT_CMD(
+	ethstart, 1, 0, do_eth_start,
+	"Ethernet Autoneg commands",
+	"Ethernet Autoneg commands"	
+	
+);
+#endif

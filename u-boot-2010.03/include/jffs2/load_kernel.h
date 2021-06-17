@@ -31,9 +31,16 @@
 #define MTD_DEV_TYPE_NOR	0x0001
 #define MTD_DEV_TYPE_NAND	0x0002
 #define MTD_DEV_TYPE_ONENAND	0x0004
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+#define MTD_DEV_TYPE_SPI	0x0008
 
 #define MTD_DEV_TYPE(type) ((type == MTD_DEV_TYPE_NAND) ? "nand" :	\
+			(type == MTD_DEV_TYPE_ONENAND) ? "onenand" :	\
+			(type == MTD_DEV_TYPE_SPI) ? "spi" : "nor")
+#else
+#define MTD_DEV_TYPE(type) ((type == MTD_DEV_TYPE_NAND) ? "nand" :	\
 			(type == MTD_DEV_TYPE_ONENAND) ? "onenand" : "nor")
+#endif
 
 struct mtd_device {
 	struct list_head link;

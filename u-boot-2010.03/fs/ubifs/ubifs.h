@@ -575,6 +575,9 @@ static inline ino_t parent_ino(struct dentry *dentry)
 /* Maximum number of data nodes to bulk-read */
 #define UBIFS_MAX_BULK_READ 32
 
+/* Enable Get Filesize API */
+#define UBIFS_GETFILESIZE
+
 /*
  * Lockdep classes for UBIFS inode @ui_mutex.
  */
@@ -2140,4 +2143,10 @@ int ubifs_decompress(const void *buf, int len, void *out, int *out_len,
 /* todo: Move these to a common U-Boot header */
 int lzo1x_decompress_safe(const unsigned char *in, size_t in_len,
 			  unsigned char *out, size_t *out_len);
+#ifdef CONFIG_UBIFS_REUSE_LEBMEM
+extern void ubifs_initialize_lebmem(void);
+extern void* ubifs_alloc_lebmem(unsigned int size);
+extern void ubifs_release_lebmem(void* p);
+#endif/*CONFIG_UBIFS_REUSE_LEBMEM*/
+
 #endif /* !__UBIFS_H__ */

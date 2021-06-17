@@ -49,6 +49,12 @@
 #define SPSN_ID_S25FL016A	0x0214
 #define SPSN_ID_S25FL032A	0x0215
 #define SPSN_ID_S25FL064A	0x0216
+#ifdef CONFIG_TC90431_SPI
+#define SPSN_ID_S25FL032P	0x0215
+#define SPSN_EXT_ID_S25FL032P	0x4d00
+#define SPSN_ID_S25FL129P	0x2018
+#define SPSN_EXT_ID_S25FL129P_64KB	0x4d01
+#endif
 #define SPSN_ID_S25FL128P	0x2018
 #define SPSN_EXT_ID_S25FL128P_256KB	0x0300
 #define SPSN_EXT_ID_S25FL128P_64KB	0x0301
@@ -62,6 +68,12 @@ struct spansion_spi_flash_params {
 	u16 pages_per_sector;
 	u16 nr_sectors;
 	const char *name;
+#ifdef CONFIG_TC90431_SPI
+	u32 max_hz;
+	u32 deassert_time;
+	u32 hp_read_op;
+	u32 max_hp_hz;
+#endif
 };
 
 struct spansion_spi_flash {
@@ -75,7 +87,123 @@ static inline struct spansion_spi_flash *to_spansion_spi_flash(struct spi_flash
 	return container_of(flash, struct spansion_spi_flash, flash);
 }
 
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+static int spansion_wait_ready(struct spi_flash *flash, unsigned long timeout);
+
+#define CMD_S25FLXX_RDCR	0x35	/* Read Configration Register */
+#define SPANSION_CR_QUAD	(1 << 1)	/* Quad Mode Enable */
+
+static int spansion_quad_enable(struct spi_flash *flash)
+{
+	int ret;
+	u8 cmd, status[2];
+
+	ret = spi_claim_bus(flash->spi);
+	if (ret) {
+		debug("SF: Unable to claim SPI bus\n");
+		return ret;
+	}
+
+	cmd = CMD_S25FLXX_RDSR;
+	ret = spi_flash_cmd(flash->spi, cmd, &status[0], sizeof(status[0]));
+	if (ret)
+		return -1;
+
+	cmd = CMD_S25FLXX_RDCR;
+	ret = spi_flash_cmd(flash->spi, cmd, &status[1], sizeof(status[1]));
+	if (ret)
+		return -1;
+
+	cmd = CMD_S25FLXX_WREN;
+	ret = spi_flash_cmd(flash->spi, cmd, NULL, 0);
+	if (ret)
+		return -1;
+
+	status[1] |= SPANSION_CR_QUAD;
+	cmd = CMD_S25FLXX_WRSR;
+	ret = spi_flash_cmd_write(flash->spi, &cmd, 1, status, sizeof(status));
+	if (ret)
+		return -1;
+
+	ret = spansion_wait_ready(flash, SPI_FLASH_PROG_TIMEOUT);
+	if (ret)
+		return -1;
+
+	spi_release_bus(flash->spi);
+
+	return 0;
+}
+
+static int spansion_option (u32 flag, void *param)
+{
+	if (flag & SF_SET_MAP_READ) {
+		int ret;
+		struct spi_flash *flash = param;
+		struct spansion_spi_flash *spsn = to_spansion_spi_flash(flash);
+
+		switch (flash->read_op) {
+		case OPCODE_FAST_READ_SINGLE:
+			flash->spi->max_map_read_hz = spsn->params->max_hz;
+			flash->dummy_count = 1;
+			break;
+		case OPCODE_FAST_READ_DUAL_IO:
+			flash->spi->max_map_read_hz = spsn->params->max_hp_hz;
+			flash->dummy_count = 1;
+			break;
+		case OPCODE_FAST_READ_QUAD_IO:
+			flash->spi->max_map_read_hz = spsn->params->max_hp_hz;
+			flash->dummy_count = 3;
+			ret = spansion_quad_enable(flash);
+			if (ret)
+				return -1;
+			break;
+		default:
+			return -1;
+		}
+	}
+	return 0;
+}
+#endif
+
 static const struct spansion_spi_flash_params spansion_spi_flash_table[] = {
+#ifdef CONFIG_TC90431_SPI
+	{
+		.idcode1 = SPSN_ID_S25FL032P,
+		.idcode2 = SPSN_EXT_ID_S25FL032P,
+		.page_size = 256,
+		.pages_per_sector = 256,
+		.nr_sectors = 64,
+		.name = "S25FL032P",
+		.max_hz = 104000000,
+		.deassert_time = 50,
+		.hp_read_op = OPCODE_FAST_READ_QUAD_IO,
+		.max_hp_hz = 80000000,
+	},
+	{
+		.idcode1 = SPSN_ID_S25FL128P,
+		.idcode2 = SPSN_EXT_ID_S25FL128P_64KB,
+		.page_size = 256,
+		.pages_per_sector = 256,
+		.nr_sectors = 256,
+		.name = "S25FL128P_64K",
+		.max_hz = 104000000,
+		.deassert_time = 100,
+		.hp_read_op = OPCODE_FAST_READ_SINGLE,
+		.max_hp_hz = 104000000,
+	},
+	{
+		.idcode1 = SPSN_ID_S25FL129P,
+		.idcode2 = SPSN_EXT_ID_S25FL129P_64KB,
+		.page_size = 256,
+		.pages_per_sector = 256,
+		.nr_sectors = 256,
+		.name = "S25FL129P_64K",
+		.max_hz = 104000000,
+		.deassert_time = 50,
+		.hp_read_op = OPCODE_FAST_READ_QUAD_IO,
+		.max_hp_hz = 80000000,
+	},
+#else
 	{
 		.idcode1 = SPSN_ID_S25FL008A,
 		.idcode2 = 0,
@@ -124,6 +252,7 @@ static const struct spansion_spi_flash_params spansion_spi_flash_table[] = {
 		.nr_sectors = 64,
 		.name = "S25FL128P_256K",
 	},
+#endif
 };
 
 static int spansion_wait_ready(struct spi_flash *flash, unsigned long timeout)
@@ -159,10 +288,47 @@ static int spansion_read_fast(struct spi_flash *flash,
 	unsigned long page_addr;
 	unsigned long page_size;
 	u8 cmd[5];
+#ifdef CONFIG_TC90431_SPI
+	unsigned long byte_addr;
+	size_t chunk_len;
+	size_t actual;
+	int ret;
+#endif
 
 	page_size = spsn->params->page_size;
 	page_addr = offset / page_size;
+#ifdef CONFIG_TC90431_SPI
+	byte_addr = offset % page_size;
 
+	ret = 0;
+	for (actual = 0; actual < len; actual += chunk_len) {
+		chunk_len = min(len - actual, page_size - byte_addr);
+
+		cmd[0] = CMD_READ_ARRAY_FAST;
+		cmd[1] = page_addr >> 8;
+		cmd[2] = page_addr;
+		cmd[3] = byte_addr;
+		cmd[4] = 0x00;
+
+		debug
+		    ("READ: 0x%p => cmd = { 0x%02x 0x%02x%02x%02x%02x } chunk_len = %d\n",
+		     buf + actual, cmd[0], cmd[1], cmd[2], cmd[3], cmd[4], chunk_len);
+
+		ret = spi_flash_read_common(flash, cmd, sizeof(cmd), buf + actual, chunk_len);
+		if (ret < 0) {
+			debug("SF: SPANSION Read failed\n");
+			break;
+		}
+
+		page_addr++;
+		byte_addr = 0;
+	}
+
+	debug("SF: SPANSION: Successfully Read %u bytes @ 0x%x\n",
+	      len, offset);
+
+	return ret;
+#else
 	cmd[0] = CMD_READ_ARRAY_FAST;
 	cmd[1] = page_addr >> 8;
 	cmd[2] = page_addr;
@@ -174,6 +340,7 @@ static int spansion_read_fast(struct spi_flash *flash,
 		 offset, cmd[0], cmd[1], cmd[2], cmd[3], cmd[4], len);
 
 	return spi_flash_read_common(flash, cmd, sizeof(cmd), buf, len);
+#endif
 }
 
 static int spansion_write(struct spi_flash *flash,
@@ -317,7 +484,12 @@ struct spi_flash *spi_flash_probe_spansion(struct spi_slave *spi, u8 *idcode)
 	for (i = 0; i < ARRAY_SIZE(spansion_spi_flash_table); i++) {
 		params = &spansion_spi_flash_table[i];
 		if (params->idcode1 == jedec) {
+#ifdef CONFIG_TC90431_SPI
+			if ((params->idcode2 == 0) ||
+				(params->idcode2 == ext_jedec))
+#else
 			if (params->idcode2 == ext_jedec)
+#endif
 				break;
 		}
 	}
@@ -342,6 +514,22 @@ struct spi_flash *spi_flash_probe_spansion(struct spi_slave *spi, u8 *idcode)
 	spsn->flash.read = spansion_read_fast;
 	spsn->flash.size = params->page_size * params->pages_per_sector
 	    * params->nr_sectors;
+
+#ifdef CONFIG_TC90431_SPI
+	spi->max_hz = params->max_hz;
+	spi->deassert_time = params->deassert_time;
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+	spsn->flash.option = spansion_option;
+	spsn->flash.sector_size = params->page_size * params->pages_per_sector;
+#ifdef CONFIG_SYS_FLASH_SPI_HIGH_PERFORMANCE_READ
+	spi->max_map_read_hz = params->max_hp_hz;
+	spsn->flash.read_op = params->hp_read_op;
+#else
+	spi->max_map_read_hz = params->max_hz;
+	spsn->flash.read_op = OPCODE_FAST_READ_SINGLE;
+#endif
+#endif
+#endif
 
 	debug("SF: Detected %s with page size %u, total %u bytes\n",
 	      params->name, params->page_size, spsn->flash.size);

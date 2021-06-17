@@ -605,6 +605,13 @@ ulong	vfd_setmem (ulong);
 ulong	video_setmem (ulong);
 
 /* lib_$(ARCH)/cache.c */
+#ifdef CONFIG_TC90431
+#include <asm/cache.h>
+void	invalidate_icache_all(void);
+void	invalidate_icache_range(unsigned long start, unsigned long stop);
+void	invalidate_dcache_all(void);
+void	flush_invalidate_dcache_all(void);
+#endif
 void	flush_cache   (unsigned long, unsigned long);
 void	flush_dcache_range(unsigned long start, unsigned long stop);
 void	invalidate_dcache_range(unsigned long start, unsigned long stop);
@@ -744,5 +751,7 @@ int cpu_release(int nr, int argc, char *argv[]);
 
 #define ALIGN(x,a)		__ALIGN_MASK((x),(typeof(x))(a)-1)
 #define __ALIGN_MASK(x,mask)	(((x)+(mask))&~(mask))
+
+#include <uboot_time.h>
 
 #endif	/* __COMMON_H_ */

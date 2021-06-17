@@ -516,6 +516,13 @@ int do_usb(cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 	block_dev_desc_t *stor_dev;
 #endif
 
+#ifdef CONFIG_TOSHIBA_BOARDS
+	if (argc < 2) {
+		cmd_usage(cmdtp);
+		return 1;
+	}
+#endif
+
 	if ((strncmp(argv[1], "reset", 5) == 0) ||
 		 (strncmp(argv[1], "start", 5) == 0)) {
 		usb_stop();

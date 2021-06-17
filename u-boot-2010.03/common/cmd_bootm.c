@@ -303,7 +303,7 @@ static int bootm_start(cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 		}
 
 #if defined(CONFIG_OF_LIBFDT)
-#if defined(CONFIG_PPC) || defined(CONFIG_M68K) || defined(CONFIG_SPARC)
+#if defined(CONFIG_PPC) || defined(CONFIG_M68K) || defined(CONFIG_SPARC) || defined(CONFIG_ARM)
 		/* find flattened device tree */
 		ret = boot_get_fdt (flag, argc, argv, &images,
 				    &images.ft_addr, &images.ft_len);
@@ -447,16 +447,48 @@ static int bootm_start_standalone(ulong iflag, int argc, char *argv[])
 {
 	char  *s;
 	int   (*appl)(int, char *[]);
+#ifdef CONFIG_TOSHIBA_BOARDS
+	char buf[32];
+
+	sprintf(buf, "%lX", images.os.image_len);
+	setenv("filesize", buf);
+#endif
 
 	/* Don't start if "autostart" is set to "no" */
 	if (((s = getenv("autostart")) != NULL) && (strcmp(s, "no") == 0)) {
+#ifndef CONFIG_TOSHIBA_BOARDS
 		char buf[32];
 		sprintf(buf, "%lX", images.os.image_len);
 		setenv("filesize", buf);
+#endif
 		return 0;
 	}
+
+#ifdef CONFIG_TOSHIBA_BOARDS
+	appl = (int (*)(int, char *[]))(images.ep);
+#ifdef CONFIG_STANDALONE_ENABLE_CACHE
+	flush_invalidate_dcache_all ();
+	invalidate_icache_all ();
+#else
+	cleanup_before_linux ();
+#endif
+#else
 	appl = (int (*)(int, char *[]))ntohl(images.ep);
+#endif
+
+#ifdef CONFIG_DISPLAY_BOOTTIME
+	{
+		extern void boottime (void);
+		if (getenv ("boottime") && getenv ("bootcmd"))
+			boottime ();
+	}
+#endif
+
 	(*appl)(argc-1, &argv[1]);
+
+#if defined(CONFIG_TOSHIBA_BOARDS) && !defined(CONFIG_STANDALONE_ENABLE_CACHE)
+	setup_after_linux ();
+#endif
 
 	return 0;
 }
@@ -547,8 +579,13 @@ int do_bootm_subcommand (cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 		case BOOTM_STATE_FDT:
 		{
 			ulong bootmap_base = getenv_bootm_low();
+#if defined(CONFIG_LMB)
 			ret = boot_relocate_fdt(&images.lmb, bootmap_base,
 				&images.ft_addr, &images.ft_len);
+#else/*CONFIG_LMB*/
+			ret = boot_relocate_fdt(NULL, bootmap_base,
+				&images.ft_addr, &images.ft_len);
+#endif/*CONFIG_LMB*/
 			break;
 		}
 #endif
@@ -637,6 +674,9 @@ int do_bootm (cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 	 * updated every 1 ms within the HCCA structure in SDRAM! For more
 	 * details see the OpenHCI specification.
 	 */
+#ifdef CONFIG_TOSHIBA_BOARDS
+	if (images.os.type != IH_TYPE_STANDALONE)
+#endif/*CONFIG_TOSHIBA_BOARDS*/
 	usb_stop();
 #endif
 

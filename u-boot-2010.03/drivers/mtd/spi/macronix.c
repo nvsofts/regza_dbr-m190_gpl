@@ -58,6 +58,12 @@ struct macronix_spi_flash_params {
 	u16 sectors_per_block;
 	u16 nr_blocks;
 	const char *name;
+#ifdef CONFIG_TC90431_SPI
+	u32 max_hz;
+	u32 deassert_time;
+	u32 hp_read_op;
+	u32 max_hp_hz;
+#endif
 };
 
 struct macronix_spi_flash {
@@ -71,7 +77,141 @@ static inline struct macronix_spi_flash *to_macronix_spi_flash(struct spi_flash
 	return container_of(flash, struct macronix_spi_flash, flash);
 }
 
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+static int macronix_wait_ready(struct spi_flash *flash, unsigned long timeout);
+
+#define MACRONIX_SR_QE		(1 << 6)	/* Quad Mode Enable */
+
+static int macronix_quad_enable(struct spi_flash *flash)
+{
+	int ret;
+	u8 cmd, status;
+
+	ret = spi_claim_bus(flash->spi);
+	if (ret) {
+		debug("SF: Unable to claim SPI bus\n");
+		return ret;
+	}
+
+	cmd = CMD_MX25XX_RDSR;
+	ret = spi_flash_cmd(flash->spi, cmd, &status, sizeof(status));
+	if (ret)
+		return -1;
+
+	cmd = CMD_MX25XX_WREN;
+	ret = spi_flash_cmd(flash->spi, cmd, NULL, 0);
+	if (ret)
+		return -1;
+
+	status |= MACRONIX_SR_QE;
+	cmd = CMD_MX25XX_WRSR;
+	ret = spi_flash_cmd_write(flash->spi, &cmd, 1, &status, 1);
+	if (ret)
+		return -1;
+
+	ret = macronix_wait_ready(flash, SPI_FLASH_PROG_TIMEOUT);
+	if (ret)
+		return -1;
+
+	spi_release_bus(flash->spi);
+
+	return 0;
+}
+
+static int macronix_option (u32 flag, void *param)
+{
+	if (flag & SF_SET_MAP_READ) {
+		int ret;
+		struct spi_flash *flash = param;
+		struct macronix_spi_flash *mcx = to_macronix_spi_flash(flash);
+
+		switch (flash->read_op) {
+		case OPCODE_FAST_READ_SINGLE:
+			flash->spi->max_map_read_hz = mcx->params->max_hz;
+			flash->dummy_count = 1;
+			break;
+		case OPCODE_FAST_READ_DUAL_IO:
+			flash->spi->max_map_read_hz = mcx->params->max_hp_hz;
+			flash->dummy_count = 1;
+			break;
+		case OPCODE_FAST_READ_QUAD_IO:
+			flash->spi->max_map_read_hz = mcx->params->max_hp_hz;
+			flash->dummy_count = 3;
+			ret = macronix_quad_enable(flash);
+			if (ret)
+				return -1;
+			break;
+		default:
+			return -1;
+		}
+	}
+	return 0;
+}
+#endif
+
 static const struct macronix_spi_flash_params macronix_spi_flash_table[] = {
+#ifdef CONFIG_TC90431_SPI
+	{
+		.idcode = 0x2015,
+		.page_size = 256,
+		.pages_per_sector = 16,
+		.sectors_per_block = 16,
+		.nr_blocks = 32,
+		.name = "MX25L1605D",
+		.max_hz = 86000000,
+		.deassert_time = 100,
+		.hp_read_op = OPCODE_FAST_READ_DUAL_IO,
+		.max_hp_hz = 50000000,
+	},
+	{
+		.idcode = 0x2415,
+		.page_size = 256,
+		.pages_per_sector = 16,
+		.sectors_per_block = 16,
+		.nr_blocks = 32,
+		.name = "MX25L1635D",
+		.max_hz = 86000000,
+		.deassert_time = 50,
+		.hp_read_op = OPCODE_FAST_READ_QUAD_IO,
+		.max_hp_hz = 75000000,
+	},
+	{
+		.idcode = 0x5e16,
+		.page_size = 256,
+		.pages_per_sector = 16,
+		.sectors_per_block = 16,
+		.nr_blocks = 64,
+		.name = "MX25L3235D",
+		.max_hz = 104000000,
+		.deassert_time = 50,
+		.hp_read_op = OPCODE_FAST_READ_QUAD_IO,
+		.max_hp_hz = 75000000,
+	},
+	{
+		.idcode = 0x2017,
+		.page_size = 256,
+		.pages_per_sector = 16,
+		.sectors_per_block = 16,
+		.nr_blocks = 128,
+		.name = "MX25L6445E",
+		.max_hz = 104000000,
+		.deassert_time = 50,
+		.hp_read_op = OPCODE_FAST_READ_QUAD_IO,
+		.max_hp_hz = 70000000,
+	},
+	{
+		.idcode = 0x2018,
+		.page_size = 256,
+		.pages_per_sector = 16,
+		.sectors_per_block = 16,
+		.nr_blocks = 256,
+		.name = "MX25L12845E",
+		.max_hz = 104000000,
+		.deassert_time = 50,
+		.hp_read_op = OPCODE_FAST_READ_QUAD_IO,
+		.max_hp_hz = 70000000,
+	},
+#else
 	{
 		.idcode = 0x2015,
 		.page_size = 256,
@@ -112,6 +252,7 @@ static const struct macronix_spi_flash_params macronix_spi_flash_table[] = {
 		.nr_blocks = 256,
 		.name = "MX25L12855E",
 	},
+#endif
 };
 
 static int macronix_wait_ready(struct spi_flash *flash, unsigned long timeout)
@@ -122,6 +263,18 @@ static int macronix_wait_ready(struct spi_flash *flash, unsigned long timeout)
 	u8 status;
 	u8 cmd = CMD_MX25XX_RDSR;
 
+#ifdef CONFIG_TC90431_SPI
+        timebase = get_timer(0);
+        do {
+                ret = spi_flash_cmd(spi, cmd, &status, sizeof(status));
+                if (ret)
+                        return -1;
+
+                if ((status & MACRONIX_SR_WIP) == 0)
+                        break;
+
+        } while (get_timer(timebase) < timeout);
+#else
 	ret = spi_xfer(spi, 8, &cmd, NULL, SPI_XFER_BEGIN);
 	if (ret) {
 		debug("SF: Failed to send command %02x: %d\n", cmd, ret);
@@ -140,6 +293,7 @@ static int macronix_wait_ready(struct spi_flash *flash, unsigned long timeout)
 	} while (get_timer(timebase) < timeout);
 
 	spi_xfer(spi, 0, NULL, NULL, SPI_XFER_END);
+#endif
 
 	if ((status & MACRONIX_SR_WIP) == 0)
 		return 0;
@@ -155,10 +309,47 @@ static int macronix_read_fast(struct spi_flash *flash,
 	unsigned long page_addr;
 	unsigned long page_size;
 	u8 cmd[5];
+#ifdef CONFIG_TC90431_SPI
+        unsigned long byte_addr;
+        size_t chunk_len;
+        size_t actual;
+        int ret;
+#endif
 
 	page_size = mcx->params->page_size;
 	page_addr = offset / page_size;
+#ifdef CONFIG_TC90431_SPI
+        byte_addr = offset % page_size;
 
+        ret = 0;
+        for (actual = 0; actual < len; actual += chunk_len) {
+                chunk_len = min(len - actual, page_size - byte_addr);
+
+                cmd[0] = CMD_READ_ARRAY_FAST;
+                cmd[1] = page_addr >> 8;
+                cmd[2] = page_addr;
+                cmd[3] = byte_addr;
+                cmd[4] = 0x00;
+
+                debug
+                    ("READ: 0x%p => cmd = { 0x%02x 0x%02x%02x%02x%02x } chunk_len = %d\n",
+                     buf + actual, cmd[0], cmd[1], cmd[2], cmd[3], cmd[4], chunk_len);
+
+                ret = spi_flash_read_common(flash, cmd, sizeof(cmd), buf + actual, chunk_len);
+                if (ret < 0) {
+                        debug("SF: MACRONIX Read failed\n");
+                        break;
+                }
+
+                page_addr++;
+                byte_addr = 0;
+        }
+
+        debug("SF: MACRONIX: Successfully Read %u bytes @ 0x%x\n",
+              len, offset);
+
+        return ret;
+#else
 	cmd[0] = CMD_READ_ARRAY_FAST;
 	cmd[1] = page_addr >> 8;
 	cmd[2] = page_addr;
@@ -166,6 +357,7 @@ static int macronix_read_fast(struct spi_flash *flash,
 	cmd[4] = 0x00;
 
 	return spi_flash_read_common(flash, cmd, sizeof(cmd), buf, len);
+#endif
 }
 
 static int macronix_write(struct spi_flash *flash,
@@ -330,8 +522,27 @@ struct spi_flash *spi_flash_probe_macronix(struct spi_slave *spi, u8 *idcode)
 	mcx->flash.size = params->page_size * params->pages_per_sector
 	    * params->sectors_per_block * params->nr_blocks;
 
+#ifdef CONFIG_TC90431_SPI
+	spi->max_hz = params->max_hz;
+	spi->deassert_time = params->deassert_time;
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+	mcx->flash.sector_size = params->page_size * params->pages_per_sector
+	    * params->sectors_per_block;
+	mcx->flash.option = macronix_option;
+#ifdef CONFIG_SYS_FLASH_SPI_HIGH_PERFORMANCE_READ
+	spi->max_map_read_hz = params->max_hp_hz;
+	mcx->flash.read_op = params->hp_read_op;
+#else
+	spi->max_map_read_hz = params->max_hz;
+	mcx->flash.read_op = OPCODE_FAST_READ_SINGLE;
+#endif
+#endif
+	debug("SF: Detected %s with page size %u, total %u bytes\n",
+	      params->name, params->page_size, mcx->flash.size);
+#else
 	printf("SF: Detected %s with page size %u, total %u bytes\n",
 	      params->name, params->page_size, mcx->flash.size);
+#endif
 
 	return &mcx->flash;
 }

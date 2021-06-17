@@ -24,7 +24,11 @@ ifeq ($(ARCH),ppc)
 LOAD_ADDR = 0x40000
 endif
 ifeq ($(ARCH),arm)
+ifeq ($(SOC),tc90431)
+LOAD_ADDR = 0x40200000
+else
 LOAD_ADDR = 0x1000000
+endif
 endif
 
 include $(TOPDIR)/config.mk

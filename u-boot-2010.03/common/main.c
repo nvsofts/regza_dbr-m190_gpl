@@ -43,6 +43,9 @@
 #if defined(CONFIG_SILENT_CONSOLE) || defined(CONFIG_POST) || defined(CONFIG_CMDLINE_EDITING)
 DECLARE_GLOBAL_DATA_PTR;
 #endif
+#if defined(CONFIG_TC90431_PROTOJP) || defined(CONFIG_TC90431_EU11A) ||defined(CONFIG_TC90431_JP11A)
+#include "../board/toshiba/common/board_init.h"
+#endif
 
 /*
  * Board-specific Platform code can reimplement show_boot_progress () if needed
@@ -154,6 +157,9 @@ static __inline__ int abortboot(int bootdelay)
 		       delaykey[i].str ? delaykey[i].str : "NULL");
 #  endif
 	}
+
+	if (presskey_max == 0)
+		return 0;
 
 	/* In order to keep up with incoming data, check timeout only
 	 * when catch up.
@@ -305,6 +311,10 @@ void main_loop (void)
 	trab_vfd (bmp);
 #endif	/* CONFIG_VFD && VFD_TEST_LOGO */
 
+#if defined(CONFIG_TC90431_PROTOJP) || defined(CONFIG_TC90431_EU11A) ||defined(CONFIG_TC90431_JP11A)
+	toshiba_board_init();
+#endif
+
 #ifdef CONFIG_BOOTCOUNT_LIMIT
 	bootcount = bootcount_load();
 	bootcount++;
@@ -436,9 +446,25 @@ void main_loop (void)
 	}
 #endif
 
+#if defined(CONFIG_TC90431_PROTOJP) || defined(CONFIG_TC90431_EU11A) ||defined(CONFIG_TC90431_JP11A)
+	run_command("ucom gdtoff", 0);
+#endif
+
+#ifdef CONFIG_DISPLAY_BOOTTIME
+	{
+	    extern void boottime (void);
+	    if (getenv ("boottime"))
+	    	boottime ();
+	}
+#endif
+
 	/*
 	 * Main Loop for Monitor Command Processing
 	 */
+#ifdef CONFIG_NO_CMDLINE
+	for (;;);
+#endif
+
 #ifdef CONFIG_SYS_HUSH_PARSER
 	parse_file_outer();
 	/* This point is never reached */
@@ -458,8 +484,10 @@ void main_loop (void)
 		flag = 0;	/* assume no special flags for now */
 		if (len > 0)
 			strcpy (lastcommand, console_buffer);
+#ifndef CONFIG_DISABLE_REPEATE_COMMAND
 		else if (len == 0)
 			flag |= CMD_FLAG_REPEAT;
+#endif
 #ifdef CONFIG_BOOT_RETRY_TIME
 		else if (len == -2) {
 			/* -2 means timed out, retry autoboot
@@ -476,7 +504,11 @@ void main_loop (void)
 
 		if (len == -1)
 			puts ("<INTERRUPT>\n");
+#ifdef CONFIG_DISABLE_REPEATE_COMMAND
+		else if (len > 0)
+#else
 		else
+#endif
 			rc = run_command (lastcommand, flag);
 
 		if (rc <= 0) {

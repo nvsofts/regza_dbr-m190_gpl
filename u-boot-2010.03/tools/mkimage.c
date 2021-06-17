@@ -140,12 +140,17 @@ int mkimage_verify_print_header (void *ptr, struct stat *sbuf)
 	return retval;
 }
 
+#define OBEY_STRICT_ALIASING_RULES
 int
 main (int argc, char **argv)
 {
 	int ifd = -1;
 	struct stat sbuf;
+#ifdef OBEY_STRICT_ALIASING_RULES
+	char *ptr;
+#else
 	unsigned char *ptr;
+#endif
 	int retval = 0;
 	struct image_type_params *tparams = NULL;
 
@@ -201,8 +206,12 @@ main (int argc, char **argv)
 			case 'a':
 				if (--argc <= 0)
 					usage ();
+#ifdef OBEY_STRICT_ALIASING_RULES
+				params.addr = strtoul (*++argv, &ptr, 16);
+#else
 				params.addr = strtoul (*++argv,
 					(char **)&ptr, 16);
+#endif
 				if (*ptr) {
 					fprintf (stderr,
 						"%s: invalid load address %s\n",
@@ -219,8 +228,12 @@ main (int argc, char **argv)
 			case 'e':
 				if (--argc <= 0)
 					usage ();
+#ifdef OBEY_STRICT_ALIASING_RULES
+				params.ep = strtoul (*++argv, &ptr, 16);
+#else
 				params.ep = strtoul (*++argv,
 						(char **)&ptr, 16);
+#endif
 				if (*ptr) {
 					fprintf (stderr,
 						"%s: invalid entry point %s\n",

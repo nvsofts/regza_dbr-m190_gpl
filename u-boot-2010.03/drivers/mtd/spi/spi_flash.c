@@ -155,6 +155,11 @@ struct spi_flash *spi_flash_probe(unsigned int bus, unsigned int cs,
 		flash = spi_flash_probe_sst(spi, idcode);
 		break;
 #endif
+#ifdef CONFIG_SPI_FLASH_EON
+	case 0x1c:
+		flash = spi_flash_probe_eon(spi, idcode);
+		break;
+#endif
 	default:
 		debug("SF: Unsupported manufacturer %02X\n", idcode[0]);
 		flash = NULL;
@@ -181,3 +186,89 @@ void spi_flash_free(struct spi_flash *flash)
 	spi_free_slave(flash->spi);
 	free(flash);
 }
+
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+#include <flash.h>
+
+#ifndef CONFIG_SYS_SPI_READID_HZ
+#define CONFIG_SYS_SPI_READID_HZ	1000000
+#endif
+
+#ifndef CONFIG_SYS_SPI_FLASH_BANKS_LIST
+#define CONFIG_SYS_SPI_FLASH_BANKS_LIST	{ \
+	{CONFIG_SYS_FLASH_BASE, 0x01000000, 0, 0} }
+#endif
+
+#ifndef CONFIG_SYS_MAX_SPI_FLASH_BANKS
+#define CONFIG_SYS_MAX_SPI_FLASH_BANKS	1
+#endif
+
+#define SPI_INVALID_BUS 0xffffffff
+#define SPI_INVALID_CS  0xffffffff
+
+static struct spi_flash_map map[CONFIG_SYS_MAX_SPI_FLASH_BANKS] = CONFIG_SYS_SPI_FLASH_BANKS_LIST;
+static unsigned int base2len(phys_addr_t base) {
+	int i;
+	for (i=0; i < CONFIG_SYS_MAX_SPI_FLASH_BANKS; i++) {
+		if (base == map[i].base) {
+			return map[i].len;
+		}
+	}
+	return 0;
+}
+   
+static unsigned int base2bus(phys_addr_t base) {
+	int i;
+	for (i=0; i < CONFIG_SYS_MAX_SPI_FLASH_BANKS; i++) {
+		if (base == map[i].base) {
+			return map[i].bus;
+		}
+	}
+	return SPI_INVALID_BUS;
+}
+   
+static unsigned int base2cs(phys_addr_t base) {
+	int i;
+	for (i=0; i < CONFIG_SYS_MAX_SPI_FLASH_BANKS; i++) {
+		if (base == map[i].base) {
+			return map[i].cs;
+		}
+	}
+	return SPI_INVALID_CS;
+}
+   
+int flash_detect_spi(flash_info_t *info)
+{
+	int ret;
+	phys_addr_t base = info->start[0];
+	unsigned int len = base2len(base);
+	unsigned int bus = base2bus(base);
+	unsigned int cs = base2cs(base);
+
+	info->spifl =
+	    spi_flash_probe(bus, cs, CONFIG_SYS_SPI_READID_HZ, SPI_MODE_0);
+
+	if (!(info->spifl)) {
+		debug("%s : Failed to probe spi flash\n", __func__);
+		return 0;
+	}
+
+	info->spifl->map_base = base;
+	info->spifl->map_len = len;
+
+	info->spifl->spi->flag = DEVICE_PROBE_DONE;
+	info->spifl->spi->device_data = info->spifl;
+	info->spifl->option(SF_SET_MAP_READ, info->spifl);
+
+	/* setup for direct access */
+	ret = spi_claim_bus(info->spifl->spi);
+	if (ret) {
+		debug("SF: Failed to claim SPI bus: %d\n", ret);
+		spi_free_slave(info->spifl->spi);
+		return 0;
+	}
+	spi_release_bus(info->spifl->spi);
+
+	return 1;	
+}
+#endif

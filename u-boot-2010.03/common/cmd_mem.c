@@ -450,6 +450,9 @@ int do_mem_cp ( cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 	}
 #endif
 
+#ifdef CONFIG_TOSHIBA_BOARDS
+	perftime ();
+#endif
 	while (count-- > 0) {
 		if (size == 4)
 			*((ulong  *)dest) = *((ulong  *)addr);
@@ -460,6 +463,9 @@ int do_mem_cp ( cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 		addr += size;
 		dest += size;
 	}
+#ifdef CONFIG_TOSHIBA_BOARDS
+	perftime ();
+#endif
 	return 0;
 }
 

@@ -109,9 +109,17 @@ static int cfi_mtd_write(struct mtd_info *mtd, loff_t to, size_t len,
 	u_long t = fi->start[0] + to;
 	int error;
 
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+	if (fi->flash_id & FLASH_MAN_SPI) {
+		error = spi_flash_write(fi->spifl, to, len, buf);
+	} else {
+#endif
 	flash_set_verbose(0);
 	error = write_buff(fi, (u_char*)buf, t, len);
 	flash_set_verbose(1);
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+	}
+#endif
 
 	if (!error) {
 		*retlen = len;
@@ -243,7 +251,15 @@ int cfi_mtd_init(void)
 		if (error)
 			continue;
 
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+		if (fi->flash_id & FLASH_MAN_SPI) {
+			sprintf(cfi_mtd_names[i], "spi%d", i);
+		} else {
+#endif
 		sprintf(cfi_mtd_names[i], "nor%d", i);
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+		}
+#endif
 		mtd->name		= cfi_mtd_names[i];
 		mtd->type		= MTD_NORFLASH;
 		mtd->flags		= MTD_CAP_NORFLASH;

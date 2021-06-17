@@ -28,6 +28,10 @@
 #define DEV_TYPE_ONENAND	2
 #define DEV_TYPE_NOR		3
 
+/* this flag needs to be set in part_info struct mask_flags
+ * field for read-only partitions */
+#define MTD_WRITEABLE_CMD		1
+
 /* Private own data */
 static struct ubi_device *ubi;
 static char buffer[80];
@@ -413,6 +417,8 @@ static int ubi_dev_scan(struct mtd_info *info, char *ubidev,
 	mtd_part.name = buffer;
 	mtd_part.size = part->size;
 	mtd_part.offset = part->offset;
+	if (part->mask_flags & MTD_WRITEABLE_CMD)
+		mtd_part.mask_flags = MTD_WRITEABLE;
 	add_mtd_partitions(info, &mtd_part, 1);
 
 	strcpy(ubi_mtd_param_buffer, buffer);

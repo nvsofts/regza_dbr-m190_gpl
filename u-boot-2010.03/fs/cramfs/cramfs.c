@@ -328,7 +328,12 @@ int cramfs_check (struct part_info *info)
 {
 	struct cramfs_super *sb;
 
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+	if ((info->dev->id->type != MTD_DEV_TYPE_NOR)
+		&& (info->dev->id->type != MTD_DEV_TYPE_SPI))
+#else
 	if (info->dev->id->type != MTD_DEV_TYPE_NOR)
+#endif
 		return 0;
 
 	sb = (struct cramfs_super *) PART_OFFSET(info);

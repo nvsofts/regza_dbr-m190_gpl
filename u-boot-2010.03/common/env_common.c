@@ -263,6 +263,9 @@ void env_relocate (void)
 		env_relocate_spec ();
 	}
 	gd->env_addr = (ulong)&(env_ptr->data);
+#ifdef CONFIG_TOSHIBA_BOARDS
+	gd->bd->bi_env = env_ptr;
+#endif
 
 #ifdef CONFIG_AMIGAONEG3SE
 	disable_nvram();

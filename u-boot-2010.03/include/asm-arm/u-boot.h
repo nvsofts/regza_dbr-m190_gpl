@@ -47,6 +47,19 @@ typedef struct bd_info {
 	ulong start;
 	ulong size;
     }			bi_dram[CONFIG_NR_DRAM_BANKS];
+#ifdef CONFIG_TOSHIBA_BOARDS
+    ulong		bi_revision;	/* revision number */
+    int			bi_reloc_flag;	/* relocation flag */
+    ulong		bi_stack_top;	/* the top of stack pointer */
+    struct				/* FLASH configuration */
+    {
+	const char *name;
+	ulong flash_id;
+	ulong start;
+	ulong size;
+    }			bi_flash[CONFIG_SYS_MAX_FLASH_BANKS];
+    int			bi_boot_flash;
+#endif
 } bd_t;
 
 #define bi_env_data bi_env->data

@@ -168,19 +168,39 @@ flash_write (char *src, ulong addr, ulong cnt)
 	}
 
 	/* finally write data to flash */
+#ifdef CONFIG_TOSHIBA_BOARDS
+		perftime ();
+#endif
 	for (info = info_first; info <= info_last && cnt>0; ++info) {
 		ulong len;
 
 		len = info->start[0] + info->size - addr;
 		if (len > cnt)
 			len = cnt;
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+		if (info->flash_id == FLASH_MAN_SPI) {
+			u32 offset = addr - info->start[0];
+			if ((i = spi_flash_write(info->spifl, offset, len, src)) != 0) {
+				return (i);
+			}
+#ifdef CONFIG_CACHE_SPI
+			invalidate_dcache_range(addr,addr+len);
+#endif
+		} else {
+#endif
 		if ((i = write_buff(info, (uchar *)src, addr, len)) != 0) {
 			return (i);
 		}
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+		}
+#endif
 		cnt  -= len;
 		addr += len;
 		src  += len;
 	}
+#ifdef CONFIG_TOSHIBA_BOARDS
+		perftime ();
+#endif
 	return (ERR_OK);
 #endif /* CONFIG_SPD823TS */
 }

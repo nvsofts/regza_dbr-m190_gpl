@@ -362,7 +362,12 @@ int do_flerase (cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 	if ((argc == 2) && (mtd_id_parse(argv[1], NULL, &dev_type, &dev_num) == 0)) {
 		mtdparts_init();
 		if (find_dev_and_part(argv[1], &dev, &pnum, &part) == 0) {
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+			if ((dev->id->type == MTD_DEV_TYPE_NOR)
+				|| (dev->id->type == MTD_DEV_TYPE_SPI)) {
+#else
 			if (dev->id->type == MTD_DEV_TYPE_NOR) {
+#endif
 				bank = dev->id->num;
 				info = &flash_info[bank];
 				addr_first = part->offset + info->start[0];
@@ -570,7 +575,12 @@ int do_protect (cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 	if ((argc == 3) && (mtd_id_parse(argv[2], NULL, &dev_type, &dev_num) == 0)) {
 		mtdparts_init();
 		if (find_dev_and_part(argv[2], &dev, &pnum, &part) == 0) {
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+			if ((dev->id->type == MTD_DEV_TYPE_NOR)
+				|| (dev->id->type == MTD_DEV_TYPE_SPI)) {
+#else
 			if (dev->id->type == MTD_DEV_TYPE_NOR) {
+#endif
 				bank = dev->id->num;
 				info = &flash_info[bank];
 				addr_first = part->offset + info->start[0];

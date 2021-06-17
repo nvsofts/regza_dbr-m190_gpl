@@ -302,7 +302,11 @@ int ubifs_mount_orphans(struct ubifs_info *c, int unclean, int read_only)
 	c->max_orphans = tot_avail_orphs(c);
 
 	if (!read_only) {
+#ifdef CONFIG_UBIFS_REUSE_LEBMEM
+		c->orph_buf = ubifs_alloc_lebmem(c->leb_size);
+#else/*CONFIG_UBIFS_REUSE_LEBMEM*/
 		c->orph_buf = vmalloc(c->leb_size);
+#endif/*CONFIG_UBIFS_REUSE_LEBMEM*/
 		if (!c->orph_buf)
 			return -ENOMEM;
 	}

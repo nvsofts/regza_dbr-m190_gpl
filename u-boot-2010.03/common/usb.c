@@ -1290,6 +1290,9 @@ int usb_hub_configure(struct usb_device *dev)
 		"" : "no ");
 	usb_hub_power_on(hub);
 
+	/* Wait 200 msec for portstatus check */
+	wait_ms(200);
+
 	for (i = 0; i < dev->maxchild; i++) {
 		struct usb_port_status portsts;
 		unsigned short portstatus, portchange;

@@ -80,6 +80,23 @@
 /* EON */
 #define EN29LV040A	0x004F
 
+#ifdef CONFIG_TOSHIBA_BOARDS
+/* NUMONYX(MICRON) */
+#define M29W128G	0x227E
+
+/* EON */
+#define EN29LV800CB	0x225B
+
+/* SPANSION(MICRON) */
+#define S29GL128	0x227E
+
+/* MACRONIX */
+#define MX29GL128	0x227E
+
+/* TOSHIBA */
+#define TC58FVM7T5B	0x001B
+#endif
+
 /*
  * Unlock address sets for AMD command sets.
  * Intel command sets use the MTD_UADDR_UNNECESSARY.
@@ -163,7 +180,56 @@ struct amd_flash_info {
 	const int CmdSet;
 	const __u8 uaddr[4];		/* unlock addrs for 8, 16, 32, 64 */
 	const ulong regions[6];
+#ifdef CONFIG_TC90431
+	const int rburst_size;		/* read burst size */
+	const int t_EHEL;		/* CE# H -> CE# L (tCPH) */
+	const int t_PACC;		/* page access time */
+	const int t_AVAV;		/* read or write cycle (t_RC, tWC) */
+	const int t_WLWH;		/* WE# L -> WE# H (t_WP) */
+#endif
 };
+
+#ifdef CONFIG_TC90431
+extern u32 get_soc_rev (void);
+
+DECLARE_GLOBAL_DATA_PTR;
+
+static int tc90431_option (u32 flag, int banknum, void *param)
+{
+	if (flag & TC90431_NORC_SET) {
+		u32 val;
+		int rburst;
+		flash_info_t *info = param;
+
+		val = NORC_WTIME (0) |
+		    NORC_TTR (NS_TO_EBUS_CYCLE (info->t_EHEL)) |
+		    NORC_TPC (NS_TO_EBUS_CYCLE (info->t_PACC) + 1) |
+		    NORC_TWP (NS_TO_EBUS_CYCLE (info->t_WLWH)) |
+		    NORC_TCEOE (1) |
+		    NORC_TWC (NS_TO_EBUS_CYCLE (info->t_AVAV)) |
+		    NORC_TRC (NS_TO_EBUS_CYCLE (info->t_AVAV) + 1);
+		writel (val, TC90431_NORC_SETCYCLES);
+
+		rburst = RDBL_BURST_1;
+		if (info->rburst_size == 4) {
+			rburst = RDBL_BURST_4;
+		} else if (info->rburst_size == 8) {
+			rburst = RDBL_BURST_8;
+		} else if (info->rburst_size == 16) {
+			rburst = RDBL_BURST_16;
+		}
+
+		val = readl (TC90431_NORC_OPMODE (banknum));
+		val = (val & ~NORC_RDBL_MASK) | NORC_RDBL (rburst);
+		writel (val, TC90431_NORC_SETOPMODE);
+
+		val = NORC_CHIPSEL (banknum) | NORC_CMDTYPE (CMD_ASYNC_TYPE);
+		writel (val, TC90431_NORC_DIRECTCMD);
+	}
+
+	return 0;
+}
+#endif
 
 #define ERASEINFO(size,blocks) (size<<8)|(blocks-1)
 
@@ -175,6 +241,10 @@ struct amd_flash_info {
 #define SIZE_2MiB   21
 #define SIZE_4MiB   22
 #define SIZE_8MiB   23
+#ifdef CONFIG_TOSHIBA_BOARDS
+#define SIZE_16MiB  24
+#define SIZE_32MiB  25
+#endif
 
 static const struct amd_flash_info jedec_table[] = {
 #ifdef CONFIG_SYS_FLASH_LEGACY_256Kx8
@@ -329,6 +399,107 @@ static const struct amd_flash_info jedec_table[] = {
 		}
 	},
 #endif
+#ifdef CONFIG_TOSHIBA_BOARDS
+	{
+		.mfr_id		= (u16)STM_MANUFACT,
+		.dev_id		= M29W128G,
+		.name		= "NUMONYX M29W128GH",
+		.uaddr		= {
+			[1] = MTD_UADDR_0x0555_0x02AA /* x16 */
+		},
+		.DevSize	= SIZE_16MiB,
+		.CmdSet		= CFI_CMDSET_AMD_LEGACY,
+		.NumEraseRegions= 1,
+		.regions	= {
+			ERASEINFO(0x20000, 128),
+		},
+		.rburst_size	= 8,
+		.t_EHEL		= 30,
+		.t_PACC		= 25,
+		.t_AVAV		= 70,
+		.t_WLWH		= 35,
+	},
+	{
+		.mfr_id		= (u16)EON_MANUFACT,
+		.dev_id		= EN29LV800CB,
+		.name		= "EON EN29LV800CB",
+		.uaddr		= {
+			[1] = MTD_UADDR_0x0555_0x02AA /* x16 */
+		},
+		.DevSize	= SIZE_1MiB,
+		.CmdSet		= CFI_CMDSET_AMD_LEGACY,
+		.NumEraseRegions= 4,
+		.regions	= {
+			ERASEINFO(0x04000, 1),
+			ERASEINFO(0x02000, 2),
+			ERASEINFO(0x08000, 1),
+			ERASEINFO(0x10000, 15),
+		},
+		.rburst_size	= 1,
+		.t_EHEL		= 20,
+		.t_PACC		= 0,	/* not support page mode */
+		.t_AVAV		= 70,
+		.t_WLWH		= 35,
+	},
+	{
+		.mfr_id		= (u16)AMD_MANUFACT,
+		.dev_id		= S29GL128,
+		.name		= "SPANSION S29GL128",
+		.uaddr		= {
+			[1] = MTD_UADDR_0x0555_0x02AA /* x16 */
+		},
+		.DevSize	= SIZE_16MiB,
+		.CmdSet		= CFI_CMDSET_AMD_LEGACY,
+		.NumEraseRegions= 1,
+		.regions	= {
+			ERASEINFO(0x20000, 128),
+		},
+		.rburst_size	= 8,
+		.t_EHEL		= 30,
+		.t_PACC		= 30,
+		.t_AVAV		= 110,
+		.t_WLWH		= 35,
+	},
+	{
+		.mfr_id		= (u16)MX_MANUFACT,
+		.dev_id		= MX29GL128,
+		.name		= "MACRONIX MX29GL128",
+		.uaddr		= {
+			[1] = MTD_UADDR_0x0555_0x02AA /* x16 */
+		},
+		.DevSize	= SIZE_16MiB,
+		.CmdSet		= CFI_CMDSET_AMD_LEGACY,
+		.NumEraseRegions= 1,
+		.regions	= {
+			ERASEINFO(0x20000, 128),
+		},
+		.rburst_size	= 8,
+		.t_EHEL		= 30,
+		.t_PACC		= 30,
+		.t_AVAV		= 90,
+		.t_WLWH		= 35,
+	},
+	{
+		.mfr_id		= (u16)TOSH_MANUFACT,
+		.dev_id		= TC58FVM7T5B,
+		.name		= "TOSHIBA TC58FVM7T5B",
+		.uaddr		= {
+			[1] = MTD_UADDR_0x0555_0x02AA /* x16 */
+		},
+		.DevSize	= SIZE_16MiB,
+		.CmdSet		= CFI_CMDSET_AMD_LEGACY,
+		.NumEraseRegions= 2,
+		.regions	= {
+			ERASEINFO(0x10000, 255),
+			ERASEINFO(0x02000, 8),
+		},
+		.rburst_size	= 8,
+		.t_EHEL		= 20,
+		.t_PACC		= 25,
+		.t_AVAV		= 65,
+		.t_WLWH		= 30,
+	},
+#endif
 };
 
 static inline void fill_info(flash_info_t *info, const struct amd_flash_info *jedec_entry, ulong base)
@@ -395,6 +566,14 @@ static inline void fill_info(flash_info_t *info, const struct amd_flash_info *je
 	}
 	info->sector_count = sect_cnt;
 	info->size = total_size * size_ratio;
+#ifdef CONFIG_TC90431
+	info->rburst_size = jedec_entry->rburst_size;
+	info->t_EHEL = jedec_entry->t_EHEL;
+	info->t_PACC = jedec_entry->t_PACC;
+	info->t_AVAV = jedec_entry->t_AVAV;
+	info->t_WLWH = jedec_entry->t_WLWH;
+	info->option = tc90431_option;
+#endif
 }
 
 /*-----------------------------------------------------------------------

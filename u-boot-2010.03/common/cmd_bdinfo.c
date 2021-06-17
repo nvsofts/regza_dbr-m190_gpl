@@ -325,20 +325,75 @@ int do_bdinfo ( cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 	bd_t *bd = gd->bd;
 
 	print_num ("arch_number",	bd->bi_arch_number);
+#ifndef CONFIG_TOSHIBA_BOARDS
 	print_num ("env_t",		(ulong)bd->bi_env);
 	print_num ("boot_params",	(ulong)bd->bi_boot_params);
+#else
+	printf ("revision    = 0x%08lx\n", bd->bi_revision);
+#endif
 
 	for (i=0; i<CONFIG_NR_DRAM_BANKS; ++i) {
+#ifdef CONFIG_TOSHIBA_BOARDS
+		printf("DRAM bank # %d\n", i + 1);
+#else
 		print_num("DRAM bank",	i);
+#endif
 		print_num("-> start",	bd->bi_dram[i].start);
 		print_num("-> size",	bd->bi_dram[i].size);
 	}
+
+#if defined(CONFIG_TOSHIBA_BOARDS) && !defined(CONFIG_SYS_NO_FLASH)
+	/* Flash configuration */
+	for (i=0; i<CONFIG_SYS_MAX_FLASH_BANKS; ++i) {
+		printf ("FLASH bank # %d: ", i + 1);
+
+		printf ("%s ", bd->bi_flash[i].name);
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+		if (bd->bi_flash[i].name)
+			(bd->bi_flash[i].flash_id == FLASH_MAN_SPI) ?
+			printf ("SPI FLASH") : printf ("FLASH");
+#else
+		if (bd->bi_flash[i].name)
+			printf ("FLASH");
+#endif
+		printf ("\n");
+	
+		print_num ("-> start",	bd->bi_flash[i].start);
+		print_num ("-> size",	bd->bi_flash[i].size);
+	}
+	printf ("boot_device = ");
+	if (bd->bi_reloc_flag)
+		printf ("FLASH bank # %d\n", bd->bi_boot_flash);
+	else
+		printf ("DRAM\n");
+#endif
 
 #if defined(CONFIG_CMD_NET)
 	print_eth(0);
 	printf ("ip_addr     = %pI4\n", &bd->bi_ip_addr);
 #endif
 	printf ("baudrate    = %d bps\n", bd->bi_baudrate);
+
+#ifdef CONFIG_TOSHIBA_BOARDS
+	/* Memory used by U-Boot configuration */
+	{
+		extern ulong mem_malloc_start, mem_malloc_brk;
+		void *sp;
+		printf ("ram_start     = 0x%08lx\n", bd->bi_dram[0].start);
+		printf ("boot_params   = 0x%08lx\n", bd->bi_boot_params);
+		__asm__ __volatile__ ("orr %0, sp, sp":"=r" (sp));
+		printf ("stack_cur     = 0x%p\n", sp);
+		printf ("stack_top     = 0x%08lx\n", bd->bi_stack_top);
+		printf ("board_data    = 0x%p\n", bd);
+		printf ("global_data   = 0x%p\n", gd);
+		printf ("malloc_start  = 0x%08lx\n", mem_malloc_start);
+		printf ("env_t         = 0x%08lx\n", (ulong)bd->bi_env);
+		printf ("malloc_cur    = 0x%08lx\n", mem_malloc_brk);
+		printf ("text_start    = 0x%08lx\n", _armboot_start);
+		printf ("bss_start     = 0x%08lx\n", _bss_start);
+		printf ("app_ram_start = 0x%08lx\n", _bss_end + 0x4);
+	}
+#endif
 
 	return 0;
 }

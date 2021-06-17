@@ -789,11 +789,19 @@ int ubi_attach_mtd_dev(struct mtd_info *mtd, int ubi_num, int vid_hdr_offset)
 		goto out_free;
 
 	err = -ENOMEM;
+#ifdef CONFIG_UBI_REUSE_PEBMEM
+	ubi->peb_buf1 = ubi_alloc_pebmem(ubi->peb_size);
+#else/*CONFIG_UBI_REUSE_PEBMEM*/
 	ubi->peb_buf1 = vmalloc(ubi->peb_size);
+#endif/*CONFIG_UBI_REUSE_PEBMEM*/
 	if (!ubi->peb_buf1)
 		goto out_free;
 
+#ifdef CONFIG_UBI_REUSE_PEBMEM
+	ubi->peb_buf2 = ubi_alloc_pebmem(ubi->peb_size);
+#else/*CONFIG_UBI_REUSE_PEBMEM*/
 	ubi->peb_buf2 = vmalloc(ubi->peb_size);
+#endif/*CONFIG_UBI_REUSE_PEBMEM*/
 	if (!ubi->peb_buf2)
 		goto out_free;
 
@@ -860,8 +868,13 @@ out_detach:
 	ubi_wl_close(ubi);
 	vfree(ubi->vtbl);
 out_free:
+#ifdef CONFIG_UBI_REUSE_PEBMEM
+	ubi_release_pebmem(ubi->peb_buf1);
+	ubi_release_pebmem(ubi->peb_buf2);
+#else/*CONFIG_UBI_REUSE_PEBMEM*/
 	vfree(ubi->peb_buf1);
 	vfree(ubi->peb_buf2);
+#endif/*CONFIG_UBI_REUSE_PEBMEM*/
 #ifdef CONFIG_MTD_UBI_DEBUG
 	vfree(ubi->dbg_peb_buf);
 #endif
@@ -923,8 +936,13 @@ int ubi_detach_mtd_dev(int ubi_num, int anyway)
 	ubi_wl_close(ubi);
 	vfree(ubi->vtbl);
 	put_mtd_device(ubi->mtd);
+#ifdef CONFIG_UBI_REUSE_PEBMEM
+	ubi_release_pebmem(ubi->peb_buf1);
+	ubi_release_pebmem(ubi->peb_buf2);
+#else/*CONFIG_UBI_REUSE_PEBMEM*/
 	vfree(ubi->peb_buf1);
 	vfree(ubi->peb_buf2);
+#endif/*CONFIG_UBI_REUSE_PEBMEM*/
 #ifdef CONFIG_MTD_UBI_DEBUG
 	vfree(ubi->dbg_peb_buf);
 #endif
@@ -1002,6 +1020,9 @@ int __init ubi_init(void)
 		goto out_dev_unreg;
 #endif
 
+#ifdef CONFIG_UBI_REUSE_PEBMEM
+	ubi_initialize_pebmem();
+#endif/*CONFIG_UBI_REUSE_PEBMEM*/
 	/* Attach MTD devices */
 	for (i = 0; i < mtd_devs; i++) {
 		struct mtd_dev_param *p = &mtd_dev_param[i];
@@ -1045,6 +1066,7 @@ out_version:
 out_class:
 	class_destroy(ubi_class);
 out:
+	mtd_devs = 0;
 	ubi_err("UBI error: cannot initialize UBI, error %d", err);
 	return err;
 }

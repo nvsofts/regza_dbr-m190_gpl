@@ -267,12 +267,17 @@ int do_nand(cmd_tbl_t * cmdtp, int flag, int argc, char *argv[])
 		return 0;
 	}
 
+#ifndef CONFIG_CMD_NAND_READONLY
 	if (strcmp(cmd, "bad") != 0 && strcmp(cmd, "erase") != 0 &&
 	    strncmp(cmd, "dump", 4) != 0 &&
 	    strncmp(cmd, "read", 4) != 0 && strncmp(cmd, "write", 5) != 0 &&
 	    strcmp(cmd, "scrub") != 0 && strcmp(cmd, "markbad") != 0 &&
 	    strcmp(cmd, "biterr") != 0 &&
 	    strcmp(cmd, "lock") != 0 && strcmp(cmd, "unlock") != 0 )
+#else/*CONFIG_CMD_NAND_READONLY*/
+	if (strcmp(cmd, "bad") != 0 && strncmp(cmd, "dump", 4) != 0 &&
+	    strncmp(cmd, "read", 4) != 0 )
+#endif/*CONFIG_CMD_NAND_READONLY*/
 		goto usage;
 
 	/* the following commands operate on the current device */
@@ -291,6 +296,7 @@ int do_nand(cmd_tbl_t * cmdtp, int flag, int argc, char *argv[])
 		return 0;
 	}
 
+#ifndef CONFIG_CMD_NAND_READONLY
 	/*
 	 * Syntax is:
 	 *   0    1     2       3    4
@@ -339,6 +345,7 @@ int do_nand(cmd_tbl_t * cmdtp, int flag, int argc, char *argv[])
 
 		return ret == 0 ? 0 : 1;
 	}
+#endif/*CONFIG_CMD_NAND_READONLY*/
 
 	if (strncmp(cmd, "dump", 4) == 0) {
 		if (argc < 3)
@@ -356,7 +363,11 @@ int do_nand(cmd_tbl_t * cmdtp, int flag, int argc, char *argv[])
 
 	}
 
+#ifndef CONFIG_CMD_NAND_READONLY
 	if (strncmp(cmd, "read", 4) == 0 || strncmp(cmd, "write", 5) == 0) {
+#else/*CONFIG_CMD_NAND_READONLY*/
+	if (strncmp(cmd, "read", 4) == 0) {
+#endif/*CONFIG_CMD_NAND_READONLY*/
 		int read;
 
 		if (argc < 4)
@@ -372,12 +383,17 @@ int do_nand(cmd_tbl_t * cmdtp, int flag, int argc, char *argv[])
 		s = strchr(cmd, '.');
 		if (!s || !strcmp(s, ".jffs2") ||
 		    !strcmp(s, ".e") || !strcmp(s, ".i")) {
-			if (read)
+			if (read){
+				perftime();
 				ret = nand_read_skip_bad(nand, off, &size,
 							 (u_char *)addr);
-			else
+				perftime();
+			}else{
+				perftime();
 				ret = nand_write_skip_bad(nand, off, &size,
 							  (u_char *)addr);
+				perftime();
+			}
 		} else if (!strcmp(s, ".oob")) {
 			/* out-of-band data */
 			mtd_oob_ops_t ops = {
@@ -401,6 +417,7 @@ int do_nand(cmd_tbl_t * cmdtp, int flag, int argc, char *argv[])
 		return ret == 0 ? 0 : 1;
 	}
 
+#ifndef CONFIG_CMD_NAND_READONLY
 	if (strcmp(cmd, "markbad") == 0) {
 		argc -= 2;
 		argv += 2;
@@ -469,6 +486,7 @@ int do_nand(cmd_tbl_t * cmdtp, int flag, int argc, char *argv[])
 		return 0;
 	}
 #endif
+#endif/*CONFIG_CMD_NAND_READONLY*/
 
 usage:
 	cmd_usage(cmdtp);
@@ -480,13 +498,20 @@ U_BOOT_CMD(nand, CONFIG_SYS_MAXARGS, 1, do_nand,
 	"info - show available NAND devices\n"
 	"nand device [dev] - show or set current device\n"
 	"nand read - addr off|partition size\n"
+#ifndef CONFIG_CMD_NAND_READONLY
 	"nand write - addr off|partition size\n"
 	"    read/write 'size' bytes starting at offset 'off'\n"
+#else/*CONFIG_CMD_NAND_READONLY*/
+	"    read 'size' bytes starting at offset 'off'\n"
+#endif/*CONFIG_CMD_NAND_READONLY*/
 	"    to/from memory address 'addr', skipping bad blocks.\n"
+#ifndef CONFIG_CMD_NAND_READONLY
 	"nand erase [clean] [off size] - erase 'size' bytes from\n"
 	"    offset 'off' (entire device if not specified)\n"
+#endif/*CONFIG_CMD_NAND_READONLY*/
 	"nand bad - show bad blocks\n"
 	"nand dump[.oob] off - dump page\n"
+#ifndef CONFIG_CMD_NAND_READONLY
 	"nand scrub - really clean NAND erasing bad blocks (UNSAFE)\n"
 	"nand markbad off [...] - mark bad block(s) at offset (UNSAFE)\n"
 	"nand biterr off - make a bit error at offset (UNSAFE)"
@@ -496,6 +521,7 @@ U_BOOT_CMD(nand, CONFIG_SYS_MAXARGS, 1, do_nand,
 	"    bring nand to lock state or display locked pages\n"
 	"nand unlock [offset] [size] - unlock section"
 #endif
+#endif/*CONFIG_CMD_NAND_READONLY*/
 );
 
 static int nand_load_image(cmd_tbl_t *cmdtp, nand_info_t *nand,

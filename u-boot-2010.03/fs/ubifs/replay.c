@@ -1020,7 +1020,11 @@ int ubifs_replay_journal(struct ubifs_info *c)
 		return -EINVAL;
 	}
 
+#ifdef CONFIG_UBIFS_REUSE_LEBMEM
+	sbuf = ubifs_alloc_lebmem(c->leb_size);
+#else/*CONFIG_UBIFS_REUSE_LEBMEM*/
 	sbuf = vmalloc(c->leb_size);
+#endif/*CONFIG_UBIFS_REUSE_LEBMEM*/
 	if (!sbuf)
 		return -ENOMEM;
 
@@ -1064,7 +1068,11 @@ int ubifs_replay_journal(struct ubifs_info *c)
 out:
 	destroy_replay_tree(c);
 	destroy_bud_list(c);
+#ifdef CONFIG_UBIFS_REUSE_LEBMEM
+	ubifs_release_lebmem(sbuf);
+#else/*CONFIG_UBIFS_REUSE_LEBMEM*/
 	vfree(sbuf);
+#endif/*CONFIG_UBIFS_REUSE_LEBMEM*/
 	c->replaying = 0;
 	return err;
 }

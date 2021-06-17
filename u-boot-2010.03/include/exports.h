@@ -37,6 +37,20 @@ int i2c_read (uchar, uint, int , uchar* , int);
 
 void app_startup(char **);
 
+#ifdef CONFIG_STANDALONE_ENABLE_CACHE
+void invalidate_icache_all (void);
+void invalidate_icache_range (unsigned long start, unsigned long stop);
+void flush_cache (unsigned long start, unsigned long size);
+void flush_dcache_range (unsigned long start, unsigned long stop);
+void flush_invalidate_dcache_all (void);
+void invalidate_dcache_all (void);
+void invalidate_dcache_range (unsigned long start, unsigned long stop);
+#ifdef CONFIG_ENABLE_MMU
+void mmu_enable_cache_on (void);
+void mmu_disable_cache_off (void);
+#endif
+#endif
+
 #endif    /* ifndef __ASSEMBLY__ */
 
 enum {

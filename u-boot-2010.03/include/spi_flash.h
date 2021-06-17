@@ -25,6 +25,9 @@
 
 #include <spi.h>
 #include <linux/types.h>
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+#include <asm/types.h>
+#endif
 
 struct spi_flash_region {
 	unsigned int	count;
@@ -38,6 +41,25 @@ struct spi_flash {
 
 	u32		size;
 
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+	u32		sector_size;
+
+	phys_addr_t	map_base;
+
+	u32		map_len;
+
+	u32		read_op;
+#define OPCODE_FAST_READ_SINGLE		0x0b
+#define OPCODE_FAST_READ_DUAL_OUTPUT	0x3b
+#define OPCODE_FAST_READ_DUAL_IO	0xbb
+#define OPCODE_FAST_READ_QUAD_OUTPUT	0x6b
+#define OPCODE_FAST_READ_QUAD_IO	0xeb
+
+	u32		dummy_count;
+
+	int		(*option)(u32 flag, void *param);
+#define SF_SET_MAP_READ		0x1
+#endif
 	int		(*read)(struct spi_flash *flash, u32 offset,
 				size_t len, void *buf);
 	int		(*write)(struct spi_flash *flash, u32 offset,
@@ -45,6 +67,15 @@ struct spi_flash {
 	int		(*erase)(struct spi_flash *flash, u32 offset,
 				size_t len);
 };
+
+#ifdef CONFIG_SYS_FLASH_PHYS_MAP_SPI
+struct spi_flash_map {
+	phys_addr_t base;
+	unsigned int len;
+	unsigned int bus;
+	unsigned int cs;
+};
+#endif
 
 struct spi_flash *spi_flash_probe(unsigned int bus, unsigned int cs,
 		unsigned int max_hz, unsigned int spi_mode);

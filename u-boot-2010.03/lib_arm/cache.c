@@ -25,6 +25,191 @@
 
 #include <common.h>
 
+#ifdef CONFIG_TC90431
+
+#ifdef CONFIG_ENABLE_ICACHE
+void invalidate_icache_all (void)
+{
+#ifdef CONFIG_ENABLE_L2CACHE
+	invalidate_l2_cache_all ();
+#endif
+	v7_invalidate_icache_all ();
+}
+
+void invalidate_icache_range(unsigned long start_addr, unsigned long stop)
+{
+	unsigned long lsize = CONFIG_SYS_CACHELINE_SIZE;
+	unsigned long addr = start_addr & ~(lsize - 1);
+	unsigned long aend = (stop - 1) & ~(lsize - 1);
+
+#ifdef CONFIG_ENABLE_L2CACHE
+	while (1) {
+		invalidate_l2_cache_line (addr);
+		if (addr == aend)
+			break;
+		addr += lsize;
+	}
+
+	addr = start_addr & ~(lsize - 1);
+#endif
+	while (1) {
+		v7_invalidate_icache_line(addr);
+		if (addr == aend)
+			break;
+		addr += lsize;
+	}
+}
+#else
+void invalidate_icache_all (void)
+{
+}
+
+void invalidate_icache_range(unsigned long start_addr, unsigned long stop)
+{
+}
+#endif
+
+#if defined(CONFIG_ENABLE_ICACHE) || defined(CONFIG_ENABLE_DCACHE)
+void flush_cache (unsigned long start_addr, unsigned long size)
+{
+	unsigned long lsize = CONFIG_SYS_CACHELINE_SIZE;
+	unsigned long addr = start_addr & ~(lsize - 1);
+	unsigned long aend = (start_addr + size - 1) & ~(lsize - 1);
+
+#ifdef CONFIG_ENABLE_L2CACHE
+	while (1) {
+#ifdef CONFIG_ENABLE_DCACHE
+		v7_clean_dcache_line(addr);
+#endif
+#ifdef CONFIG_ENABLE_ICACHE
+		v7_invalidate_icache_line(addr);
+#endif
+		if (addr == aend)
+			break;
+		addr += lsize;
+	}
+
+	addr = start_addr & ~(lsize - 1);
+	while (1) {
+		clean_and_invalidate_l2_cache_line (addr);
+		if (addr == aend)
+			break;
+		addr += lsize;
+	}
+
+	addr = start_addr & ~(lsize - 1);
+#endif
+	while (1) {
+#ifdef CONFIG_ENABLE_DCACHE
+		v7_clean_and_invalidate_dcache_line(addr);
+#endif
+#ifdef CONFIG_ENABLE_ICACHE
+		v7_invalidate_icache_line(addr);
+#endif
+		if (addr == aend)
+			break;
+		addr += lsize;
+	}
+
+}
+#else
+void flush_cache (unsigned long start_addr, unsigned long size)
+{
+}
+#endif
+
+#ifdef CONFIG_ENABLE_DCACHE
+void invalidate_dcache_all (void)
+{
+#ifdef CONFIG_ENABLE_L2CACHE
+	invalidate_l2_cache_all ();
+#endif
+	v7_invalidate_dcache_all ();
+}
+
+void invalidate_dcache_range(unsigned long start_addr, unsigned long stop)
+{
+	unsigned long lsize = CONFIG_SYS_CACHELINE_SIZE;
+	unsigned long addr = start_addr & ~(lsize - 1);
+	unsigned long aend = (stop - 1) & ~(lsize - 1);
+
+#ifdef CONFIG_ENABLE_L2CACHE
+	while (1) {
+		invalidate_l2_cache_line (addr);
+		if (addr == aend)
+			break;
+		addr += lsize;
+	}
+
+	addr = start_addr & ~(lsize - 1);
+#endif
+	while (1) {
+		v7_invalidate_dcache_line(addr);
+		if (addr == aend)
+			break;
+		addr += lsize;
+	}
+}
+
+void flush_dcache_range(unsigned long start_addr, unsigned long stop)
+{
+	unsigned long lsize = CONFIG_SYS_CACHELINE_SIZE;
+	unsigned long addr = start_addr & ~(lsize - 1);
+	unsigned long aend = (stop - 1) & ~(lsize - 1);
+
+#ifdef CONFIG_ENABLE_L2CACHE
+	while (1) {
+		v7_clean_dcache_line(addr);
+		if (addr == aend)
+			break;
+		addr += lsize;
+	}
+
+	addr = start_addr & ~(lsize - 1);
+	while (1) {
+		clean_and_invalidate_l2_cache_line (addr);
+		if (addr == aend)
+			break;
+		addr += lsize;
+	}
+
+	addr = start_addr & ~(lsize - 1);
+#endif
+	while (1) {
+		v7_clean_and_invalidate_dcache_line(addr);
+		if (addr == aend)
+			break;
+		addr += lsize;
+	}
+}
+
+void flush_invalidate_dcache_all (void)
+{
+#ifdef CONFIG_ENABLE_L2CACHE
+	v7_clean_dcache_all ();
+	clean_and_invalidate_l2_cache_all ();
+#endif
+	v7_clean_and_invalidate_dcache_all ();
+}
+
+#else
+void invalidate_dcache_all (void)
+{
+}
+
+void invalidate_dcache_range(unsigned long start_addr, unsigned long stop)
+{
+}
+
+void flush_dcache_range(unsigned long start_addr, unsigned long stop)
+{
+}
+
+void flush_invalidate_dcache_all (void)
+{
+}
+#endif
+#else	/* CONFIG_TC90431 */
 void  flush_cache (unsigned long dummy1, unsigned long dummy2)
 {
 #ifdef CONFIG_OMAP2420
@@ -34,3 +219,4 @@ void  flush_cache (unsigned long dummy1, unsigned long dummy2)
 #endif
 	return;
 }
+#endif	/* CONFIG_TC90431 */

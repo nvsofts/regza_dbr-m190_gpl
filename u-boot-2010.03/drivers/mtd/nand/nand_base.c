@@ -456,7 +456,11 @@ static int nand_check_wp(struct mtd_info *mtd)
 	struct nand_chip *chip = mtd->priv;
 	/* Check the WP bit */
 	chip->cmdfunc(mtd, NAND_CMD_STATUS, -1, -1);
+#ifdef CONFIG_TC90431_NANDC
+	return (chip->waitfunc(mtd, chip) & NAND_STATUS_WP) ? 0 : 1;
+#else
 	return (chip->read_byte(mtd) & NAND_STATUS_WP) ? 0 : 1;
+#endif
 }
 
 /**
@@ -875,8 +879,13 @@ static int nand_wait(struct mtd_info *mtd, struct nand_chip *this)
 			if (this->dev_ready(mtd))
 				break;
 		} else {
+#ifdef CONFIG_TC90431_NANDC
+			if (this->waitfunc(mtd, this) & NAND_STATUS_READY)
+				break;
+#else
 			if (this->read_byte(mtd) & NAND_STATUS_READY)
 				break;
+#endif
 		}
 	}
 #ifdef PPCHAMELON_NAND_TIMER_HACK
@@ -2623,6 +2632,8 @@ static struct nand_flash_dev *nand_get_flash_type(struct mtd_info *mtd,
 	/* Read manufacturer and device IDs */
 	*maf_id = chip->read_byte(mtd);
 	dev_id = chip->read_byte(mtd);
+	chip->man_id = *maf_id;
+	chip->dev_id = dev_id;
 
 	/* Try again to make sure, as some systems the bus-hold or other
 	 * interface concerns can cause random data which looks like a
@@ -2726,7 +2737,11 @@ static struct nand_flash_dev *nand_get_flash_type(struct mtd_info *mtd,
 		NAND_LARGE_BADBLOCK_POS : NAND_SMALL_BADBLOCK_POS;
 
 	/* Get chip options, preserve non chip based options */
+#if defined(CONFIG_TC90431_NANDC) || defined(CONFIG_TC90431_HAM_NANDC)
+	chip->options &= NAND_CHIPOPTIONS_MSK;
+#else
 	chip->options &= ~NAND_CHIPOPTIONS_MSK;
+#endif
 	chip->options |= type->options & NAND_CHIPOPTIONS_MSK;
 
 	/*

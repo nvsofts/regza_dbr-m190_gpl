@@ -80,7 +80,11 @@ struct ehci_hcor {
 #define FLAG_CF		(1 << 0)	/* true:  we'll support "high speed" */
 	uint32_t or_portsc[CONFIG_SYS_USB_EHCI_MAX_ROOT_PORTS];
 	uint32_t or_systune;
+#ifdef CONFIG_TOSHIBA_BOARDS
+};
+#else
 } __attribute__ ((packed));
+#endif
 
 #define USBMODE		0x68		/* USB Device mode */
 #define USBMODE_SDIS	(1 << 3)	/* Stream disable */

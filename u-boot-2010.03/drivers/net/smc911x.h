@@ -447,8 +447,12 @@ static int smc911x_detect_chip(struct eth_device *dev)
 		/* Special case -- no chip present */
 		return -1;
 	} else if (val != 0x87654321) {
+#ifdef CONFIG_TOSHIBA_BOARDS
+		smc911x_reg_write(dev, ENDIAN, 0xffffffff);
+#else
 		printf(DRIVERNAME ": Invalid chip endian 0x%08lx\n", val);
 		return -1;
+#endif
 	}
 
 	val = smc911x_reg_read(dev, ID_REV) >> 16;

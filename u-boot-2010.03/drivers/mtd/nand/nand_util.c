@@ -335,9 +335,13 @@ int nand_get_lock_status(struct mtd_info *mtd, loff_t offset)
 	page = (int)(offset >> chip->page_shift);
 	chip->cmdfunc(mtd, NAND_CMD_LOCK_STATUS, -1, page & chip->pagemask);
 
+#ifdef CONFIG_TC90431_NANDC
+	;
+#else
 	ret = chip->read_byte(mtd) & (NAND_LOCK_STATUS_TIGHT
 					  | NAND_LOCK_STATUS_LOCK
 					  | NAND_LOCK_STATUS_UNLOCK);
+#endif
 
  out:
 	/* de-select the NAND device */
@@ -372,12 +376,19 @@ int nand_unlock(struct mtd_info *mtd, ulong start, ulong length)
 
 	/* check the WP bit */
 	chip->cmdfunc(mtd, NAND_CMD_STATUS, -1, -1);
+#ifdef CONFIG_TC90431_NANDC
+	if( !(chip->waitfunc(mtd, chip) & NAND_STATUS_WP)){
+		printf ("nand_unlock: Device is write protected!\n");
+		ret = -1;
+		goto out;
+	}
+#else
 	if (!(chip->read_byte(mtd) & NAND_STATUS_WP)) {
 		printf ("nand_unlock: Device is write protected!\n");
 		ret = -1;
 		goto out;
 	}
-
+#endif
 	if ((start & (mtd->erasesize - 1)) != 0) {
 		printf ("nand_unlock: Start address must be beginning of "
 			"nand block!\n");

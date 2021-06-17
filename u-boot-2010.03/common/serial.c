@@ -30,7 +30,8 @@ DECLARE_GLOBAL_DATA_PTR;
 static struct serial_device *serial_devices = NULL;
 static struct serial_device *serial_current = NULL;
 
-#if !defined(CONFIG_LWMON) && !defined(CONFIG_PXA27X)
+#if !defined(CONFIG_LWMON) && !defined(CONFIG_PXA27X) \
+&& !defined(CONFIG_TC90431)
 struct serial_device *__default_serial_console (void)
 {
 #if defined(CONFIG_8xx_CONS_SMC1) || defined(CONFIG_8xx_CONS_SMC2)
@@ -158,6 +159,12 @@ void serial_initialize (void)
 	serial_register(&s5pc1xx_serial1_device);
 	serial_register(&s5pc1xx_serial2_device);
 	serial_register(&s5pc1xx_serial3_device);
+#endif
+#if defined(CONFIG_TC90431)
+	serial_register(&tc90431_serial0_device);
+	serial_register(&tc90431_serial1_device);
+	serial_register(&tc90431_serial2_device);
+	serial_register(&tc90431_serial3_device);
 #endif
 	serial_assign (default_serial_console ()->name);
 }

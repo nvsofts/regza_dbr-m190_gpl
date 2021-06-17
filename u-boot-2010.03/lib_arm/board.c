@@ -49,6 +49,7 @@
 #include <nand.h>
 #include <onenand_uboot.h>
 #include <mmc.h>
+#include <spi.h>
 
 #ifdef CONFIG_BITBANGMII
 #include <miiphy.h>
@@ -207,6 +208,16 @@ static int arm_pci_init(void)
 }
 #endif /* CONFIG_CMD_PCI || CONFIG_PCI */
 
+#ifdef CONFIG_TC90431_SPI
+static int init_func_spi (void)
+{
+	puts ("SPI:   ");
+	spi_init ();
+	puts ("ready\n");
+	return (0);
+}
+#endif
+
 /*
  * Breathe some life into the board...
  *
@@ -264,6 +275,9 @@ init_fnc_t *init_sequence[] = {
 #if defined(CONFIG_CMD_PCI) || defined (CONFIG_PCI)
 	arm_pci_init,
 #endif
+#ifdef CONFIG_TC90431_SPI
+	init_func_spi,
+#endif
 	display_dram_config,
 	NULL,
 };
@@ -275,6 +289,9 @@ void start_armboot (void)
 #if defined(CONFIG_VFD) || defined(CONFIG_LCD)
 	unsigned long addr;
 #endif
+
+	UBOOT_TIME_INIT();
+	UBOOT_TIME("START_ARMBT");
 
 	/* Pointer is writable since we allocated a register for it */
 	gd = (gd_t*)(_armboot_start - CONFIG_SYS_MALLOC_LEN - sizeof(gd_t));
@@ -302,6 +319,9 @@ void start_armboot (void)
 #ifndef CONFIG_SYS_NO_FLASH
 	/* configure available FLASH banks */
 	display_flash_config (flash_init ());
+#ifdef CONFIG_TOSHIBA_BOARDS
+	flash_configure_init ();
+#endif
 #endif /* CONFIG_SYS_NO_FLASH */
 
 #ifdef CONFIG_VFD

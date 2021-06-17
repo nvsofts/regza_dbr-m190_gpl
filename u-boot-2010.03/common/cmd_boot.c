@@ -49,12 +49,33 @@ int do_go (cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 
 	printf ("## Starting application at 0x%08lX ...\n", addr);
 
+#ifdef CONFIG_TOSHIBA_BOARDS
+#ifdef CONFIG_STANDALONE_ENABLE_CACHE
+	flush_invalidate_dcache_all ();
+	invalidate_icache_all ();
+#else
+	cleanup_before_linux ();
+#endif
+#endif
+
+#ifdef CONFIG_DISPLAY_BOOTTIME
+	{
+		extern void boottime (void);
+		if (getenv ("boottime") && getenv ("bootcmd"))
+			boottime ();
+	}
+#endif
+
 	/*
 	 * pass address parameter as argv[0] (aka command name),
 	 * and all remaining args
 	 */
 	rc = do_go_exec ((void *)addr, argc - 1, argv + 1);
 	if (rc != 0) rcode = 1;
+
+#if defined(CONFIG_TOSHIBA_BOARDS) && !defined(CONFIG_STANDALONE_ENABLE_CACHE)
+	setup_after_linux ();
+#endif
 
 	printf ("## Application terminated, rc = 0x%lX\n", rc);
 	return rcode;

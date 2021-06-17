@@ -123,8 +123,13 @@ static void flush_invalidate(u32 addr, int size, int flush)
 
 static void cache_qtd(struct qTD *qtd, int flush)
 {
+#ifdef CONFIG_TOSHIBA_BOARDS
+	u32 *ptr = (qtd->qt_buffer[0]) ? (u32 *)phys_to_virt(hc32_to_cpu(qtd->qt_buffer[0])) : NULL;
+	int len = (hc32_to_cpu(qtd->qt_token) & 0x7fff0000) >> 16;
+#else
 	u32 *ptr = (u32 *)qtd->qt_buffer[0];
 	int len = (qtd->qt_token & 0x7fff0000) >> 16;
+#endif
 
 	flush_invalidate((u32)qtd, sizeof(struct qTD), flush);
 	if (ptr && len)
@@ -151,7 +156,11 @@ static void cache_qh(struct QH *qh, int flush)
 		if ((u32)qh & QH_LINK_TYPE_QH)
 			break;
 		qh = qh_addr(qh);
+#ifdef CONFIG_TOSHIBA_BOARDS
+		qh = (struct QH *)phys_to_virt(hc32_to_cpu(qh->qh_link));
+#else
 		qh = (struct QH *)qh->qh_link;
+#endif
 	}
 	qh = qh_addr(qh);
 
@@ -159,8 +168,12 @@ static void cache_qh(struct QH *qh, int flush)
 	 * Save first qTD pointer, needed for invalidating pass on this QH
 	 */
 	if (flush)
+#ifdef CONFIG_TOSHIBA_BOARDS
+		first_qtd = qtd = (struct qTD *)phys_to_virt((hc32_to_cpu(*(u32 *)&qh->qh_overlay) & 0xffffffe0));
+#else
 		first_qtd = qtd = (struct qTD *)(*(u32 *)&qh->qh_overlay &
 						 0xffffffe0);
+#endif
 	else
 		qtd = first_qtd;
 
@@ -171,10 +184,17 @@ static void cache_qh(struct QH *qh, int flush)
 		if (qtd == NULL)
 			break;
 		cache_qtd(qtd, flush);
+#ifdef CONFIG_TOSHIBA_BOARDS
+		next = (struct qTD *)hc32_to_cpu(qtd->qt_next);
+		if (next == (void *)QT_NEXT_TERMINATE)
+			break;
+		qtd = (struct qTD *)phys_to_virt((u32)next & 0xffffffe0);
+#else
 		next = (struct qTD *)((u32)qtd->qt_next & 0xffffffe0);
 		if (next == qtd)
 			break;
 		qtd = next;
+#endif
 	}
 }
 
@@ -275,7 +295,11 @@ static void *ehci_alloc(size_t sz, size_t align)
 		return NULL;
 	}
 
+#ifdef CONFIG_TOSHIBA_BOARDS
+	memset(p, 0, sz);
+#else
 	memset(p, sz, 0);
+#endif
 	return p;
 }
 
@@ -284,7 +308,11 @@ static int ehci_td_buffer(struct qTD *td, void *buf, size_t sz)
 	uint32_t addr, delta, next;
 	int idx;
 
+#ifdef CONFIG_TOSHIBA_BOARDS
+	addr = (uint32_t) virt_to_phys(buf);
+#else
 	addr = (uint32_t) buf;
+#endif
 	idx = 0;
 	while (idx < 5) {
 		td->qt_buffer[idx] = cpu_to_hc32(addr);
@@ -333,7 +361,11 @@ ehci_submit_async(struct usb_device *dev, unsigned long pipe, void *buffer,
 		debug("unable to allocate QH\n");
 		return -1;
 	}
+#ifdef CONFIG_TOSHIBA_BOARDS
+	qh->qh_link = (uint32_t)cpu_to_hc32(virt_to_phys(&qh_list) | QH_LINK_TYPE_QH);
+#else
 	qh->qh_link = cpu_to_hc32((uint32_t)&qh_list | QH_LINK_TYPE_QH);
+#endif
 	c = (usb_pipespeed(pipe) != USB_SPEED_HIGH &&
 	     usb_pipeendpoint(pipe) == 0) ? 1 : 0;
 	endpt = (8 << 28) |
@@ -375,7 +407,11 @@ ehci_submit_async(struct usb_device *dev, unsigned long pipe, void *buffer,
 			ehci_free(td, sizeof(*td));
 			goto fail;
 		}
+#ifdef CONFIG_TOSHIBA_BOARDS
+		*tdp = (uint32_t)cpu_to_hc32(virt_to_phys(td));
+#else
 		*tdp = cpu_to_hc32((uint32_t) td);
+#endif
 		tdp = &td->qt_next;
 		toggle = 1;
 	}
@@ -400,7 +436,11 @@ ehci_submit_async(struct usb_device *dev, unsigned long pipe, void *buffer,
 			ehci_free(td, sizeof(*td));
 			goto fail;
 		}
+#ifdef CONFIG_TOSHIBA_BOARDS
+		*tdp = (uint32_t)cpu_to_hc32(virt_to_phys(td));
+#else
 		*tdp = cpu_to_hc32((uint32_t) td);
+#endif
 		tdp = &td->qt_next;
 	}
 
@@ -419,11 +459,19 @@ ehci_submit_async(struct usb_device *dev, unsigned long pipe, void *buffer,
 		    (3 << 10) |
 		    ((usb_pipein(pipe) ? 0 : 1) << 8) | (0x80 << 0);
 		td->qt_token = cpu_to_hc32(token);
+#ifdef CONFIG_TOSHIBA_BOARDS
+		*tdp = (uint32_t)cpu_to_hc32(virt_to_phys(td));
+#else
 		*tdp = cpu_to_hc32((uint32_t) td);
+#endif
 		tdp = &td->qt_next;
 	}
 
+#ifdef CONFIG_TOSHIBA_BOARDS
+	qh_list.qh_link = (uint32_t)cpu_to_hc32(virt_to_phys(qh) | QH_LINK_TYPE_QH);
+#else
 	qh_list.qh_link = cpu_to_hc32((uint32_t) qh | QH_LINK_TYPE_QH);
+#endif
 
 	/* Flush dcache */
 	ehci_flush_dcache(&qh_list);
@@ -452,7 +500,7 @@ ehci_submit_async(struct usb_device *dev, unsigned long pipe, void *buffer,
 		token = hc32_to_cpu(vtd->qt_token);
 		if (!(token & 0x80))
 			break;
-	} while (get_timer(ts) < CONFIG_SYS_HZ);
+	} while (get_timer(ts) < CONFIG_SYS_HZ*10);
 
 	/* Disable async schedule. */
 	cmd = ehci_readl(&hcor->or_usbcmd);
@@ -466,7 +514,11 @@ ehci_submit_async(struct usb_device *dev, unsigned long pipe, void *buffer,
 		goto fail;
 	}
 
+#ifdef CONFIG_TOSHIBA_BOARDS
+	qh_list.qh_link = (uint32_t)cpu_to_hc32(virt_to_phys(&qh_list) | QH_LINK_TYPE_QH);
+#else
 	qh_list.qh_link = cpu_to_hc32((uint32_t)&qh_list | QH_LINK_TYPE_QH);
+#endif
 
 	token = hc32_to_cpu(qh->qh_overlay.qt_token);
 	if (!(token & 0x80)) {
@@ -507,6 +559,9 @@ ehci_submit_async(struct usb_device *dev, unsigned long pipe, void *buffer,
 fail:
 	td = (void *)hc32_to_cpu(qh->qh_overlay.qt_next);
 	while (td != (void *)QT_NEXT_TERMINATE) {
+#ifdef CONFIG_TOSHIBA_BOARDS
+		td = (struct qTD *)phys_to_virt((u32)td);
+#endif
 		qh->qh_overlay.qt_next = td->qt_next;
 		ehci_free(td, sizeof(*td));
 		td = (void *)hc32_to_cpu(qh->qh_overlay.qt_next);
@@ -778,6 +833,37 @@ unknown:
 
 int usb_lowlevel_stop(void)
 {
+#ifdef CONFIG_TOSHIBA_BOARDS
+        int ret, port;
+        uint32_t sts, cmd;
+
+        sts = ehci_readl(&hcor->or_usbsts);
+	if (sts & STS_HALT)
+		return 0;	/* not run */
+
+        cmd = ehci_readl(&hcor->or_usbcmd);
+        cmd &= ~(CMD_ASE | CMD_RUN);
+        ehci_writel(&hcor->or_usbcmd, cmd);
+
+        ret = handshake((uint32_t *)&hcor->or_usbsts, STD_ASS | STS_HALT, STS_HALT, 16 * 125);
+        if (ret < 0) {
+                printf("EHCI fail to halt\n");
+                return -1;
+        }
+
+        port = HCS_N_PORTS(ehci_readl(&hccr->cr_hcsparams));
+        while (port--) {
+                cmd = ehci_readl(&hcor->or_portsc[port]);
+                cmd |= EHCI_PS_PR;
+                cmd &= ~EHCI_PS_PE;
+                ehci_writel(&hcor->or_portsc[port], cmd);
+        }
+
+        cmd = ehci_readl(&hcor->or_configflag);
+        cmd &= ~FLAG_CF;
+        ehci_writel(&hcor->or_configflag, cmd);
+#endif
+
 	return ehci_hcd_stop();
 }
 
@@ -800,7 +886,11 @@ int usb_lowlevel_init(void)
 
 	/* Set head of reclaim list */
 	memset(&qh_list, 0, sizeof(qh_list));
+#ifdef CONFIG_TOSHIBA_BOARDS
+	qh_list.qh_link = (uint32_t)cpu_to_hc32(virt_to_phys(&qh_list) | QH_LINK_TYPE_QH);
+#else
 	qh_list.qh_link = cpu_to_hc32((uint32_t)&qh_list | QH_LINK_TYPE_QH);
+#endif
 	qh_list.qh_endpt1 = cpu_to_hc32((1 << 15) | (USB_SPEED_HIGH << 12));
 	qh_list.qh_curtd = cpu_to_hc32(QT_NEXT_TERMINATE);
 	qh_list.qh_overlay.qt_next = cpu_to_hc32(QT_NEXT_TERMINATE);
@@ -808,7 +898,11 @@ int usb_lowlevel_init(void)
 	qh_list.qh_overlay.qt_token = cpu_to_hc32(0x40);
 
 	/* Set async. queue head pointer. */
+#ifdef CONFIG_TOSHIBA_BOARDS
+	ehci_writel(&hcor->or_asynclistaddr, (uint32_t)virt_to_phys(&qh_list));
+#else
 	ehci_writel(&hcor->or_asynclistaddr, (uint32_t)&qh_list);
+#endif
 
 	reg = ehci_readl(&hccr->cr_hcsparams);
 	descriptor.hub.bNbrPorts = HCS_N_PORTS(reg);

@@ -26,6 +26,9 @@
 #include <image.h>
 #include <u-boot/zlib.h>
 #include <asm/byteorder.h>
+#ifdef CONFIG_OF_LIBFDT
+#include <libfdt.h>
+#endif/*CONFIG_OF_LIBFDT*/
 
 DECLARE_GLOBAL_DATA_PTR;
 
@@ -83,6 +86,14 @@ int do_bootm_linux(int flag, int argc, char *argv[], bootm_headers_t *images)
 	debug ("## Transferring control to Linux (at address %08lx) ...\n",
 	       (ulong) theKernel);
 
+#ifdef CONFIG_OF_LIBFDT
+	if ((images->ft_addr) && (images->ft_len)) {
+		printf("FDT : %x %x\n", (unsigned int)images->ft_addr, (unsigned int)images->ft_len);
+		machid = 0xffffffff;
+	}
+	if (machid != 0xffffffff) {
+#endif/*CONFIG_OF_LIBFDT*/
+
 #if defined (CONFIG_SETUP_MEMORY_TAGS) || \
     defined (CONFIG_CMDLINE_TAG) || \
     defined (CONFIG_INITRD_TAG) || \
@@ -113,6 +124,10 @@ int do_bootm_linux(int flag, int argc, char *argv[], bootm_headers_t *images)
 	setup_end_tag (bd);
 #endif
 
+#ifdef CONFIG_OF_LIBFDT
+	}
+#endif/*CONFIG_OF_LIBFDT*/
+
 	/* we assume that the kernel is in place */
 	printf ("\nStarting kernel ...\n\n");
 
@@ -123,10 +138,39 @@ int do_bootm_linux(int flag, int argc, char *argv[], bootm_headers_t *images)
 	}
 #endif
 
+#if defined(CONFIG_TOSHIBA_BOARDS) && defined(CONFIG_USB_EHCI)
+	{
+		extern int usb_lowlevel_stop(void);
+		usb_lowlevel_stop ();
+	}
+#endif
+
 	cleanup_before_linux ();
 
+#ifdef CONFIG_DISPLAY_BOOTTIME
+	{
+		extern void boottime (void);
+		char *s = getenv ("bootcmd");
+		if (s)
+			boottime ();
+	}
+#endif
+
+	UBOOT_TIME("UBOOTEND");
+
+#ifdef CONFIG_OF_LIBFDT
+	if (machid != 0xffffffff)
+		theKernel (0, machid, bd->bi_boot_params);
+	else
+		theKernel (0, 0xffffffff, (uint)(images->ft_addr));
+#else/*CONFIG_OF_LIBFDT*/
 	theKernel (0, machid, bd->bi_boot_params);
+#endif/*CONFIG_OF_LIBFDT*/
 	/* does not return */
+
+#ifdef CONFIG_TOSHIBA_BOARDS
+	setup_after_linux ();
+#endif
 
 	return 1;
 }

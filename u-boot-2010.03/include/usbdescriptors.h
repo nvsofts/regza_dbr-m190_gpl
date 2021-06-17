@@ -199,7 +199,11 @@ struct usb_endpoint_descriptor {
 	u8 bmAttributes;
 	u16 wMaxPacketSize;
 	u8 bInterval;
+#ifdef CONFIG_TOSHIBA_BOARDS
+} __attribute__ ((packed)) __attribute__ ((aligned(2)));
+#else
 } __attribute__ ((packed));
+#endif
 
 struct usb_interface_descriptor {
 	u8 bLength;

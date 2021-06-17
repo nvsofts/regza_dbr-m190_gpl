@@ -22,6 +22,13 @@ extern struct serial_device serial_smc_device;
 extern struct serial_device serial_scc_device;
 extern struct serial_device * default_serial_console (void);
 
+#if defined(CONFIG_TC90431)
+extern struct serial_device tc90431_serial0_device;
+extern struct serial_device tc90431_serial1_device;
+extern struct serial_device tc90431_serial2_device;
+extern struct serial_device tc90431_serial3_device;
+#endif
+
 #if defined(CONFIG_405GP) || defined(CONFIG_405CR) || defined(CONFIG_440) || \
     defined(CONFIG_405EP) || defined(CONFIG_405EZ) || defined(CONFIG_405EX) || \
     defined(CONFIG_MPC5xxx) || defined(CONFIG_MPC83xx) || \

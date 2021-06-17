@@ -62,6 +62,13 @@ static inline phys_addr_t virt_to_phys(void * vaddr)
 	return (phys_addr_t)(vaddr);
 }
 
+#ifdef CONFIG_TC90431
+static inline void *phys_to_virt(phys_addr_t paddr)
+{
+	return (void *)paddr;
+}
+#endif
+
 /*
  * Generic virtual read/write.  Note that we don't support half-word
  * read/writes.  We define __arch_*[bl] here, and leave __arch_*w

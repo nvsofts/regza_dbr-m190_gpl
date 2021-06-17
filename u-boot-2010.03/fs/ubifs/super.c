@@ -536,7 +536,11 @@ static void free_orphans(struct ubifs_info *c)
 		dbg_err("orphan list not empty at unmount");
 	}
 
+#ifdef CONFIG_UBIFS_REUSE_LEBMEM
+	ubifs_release_lebmem(c->orph_buf);
+#else/*CONFIG_UBIFS_REUSE_LEBMEM*/
 	vfree(c->orph_buf);
+#endif/*!CONFIG_UBIFS_REUSE_LEBMEM*/
 	c->orph_buf = NULL;
 }
 
@@ -625,7 +629,11 @@ static int mount_ubifs(struct ubifs_info *c)
 	if (!c->bottom_up_buf)
 		goto out_free;
 
+#ifdef CONFIG_UBIFS_REUSE_LEBMEM
+	c->sbuf = ubifs_alloc_lebmem(c->leb_size);
+#else/*CONFIG_UBIFS_REUSE_LEBMEM*/
 	c->sbuf = vmalloc(c->leb_size);
+#endif/*CONFIG_UBIFS_REUSE_LEBMEM*/
 	if (!c->sbuf)
 		goto out_free;
 
@@ -809,7 +817,11 @@ out_master:
 	kfree(c->cbuf);
 out_free:
 	vfree(c->ileb_buf);
+#ifdef CONFIG_UBIFS_REUSE_LEBMEM
+	ubifs_release_lebmem(c->sbuf);
+#else/*CONFIG_UBIFS_REUSE_LEBMEM*/
 	vfree(c->sbuf);
+#endif/*CONFIG_UBIFS_REUSE_LEBMEM*/
 	kfree(c->bottom_up_buf);
 	ubifs_debugging_exit(c);
 	return err;
@@ -843,13 +855,18 @@ static void ubifs_umount(struct ubifs_info *c)
 	kfree(c->rcvrd_mst_node);
 	kfree(c->mst_node);
 	vfree(c->ileb_buf);
+#ifdef CONFIG_UBIFS_REUSE_LEBMEM
+	ubifs_release_lebmem(c->sbuf);
+#else/*CONFIG_UBIFS_REUSE_LEBMEM*/
 	vfree(c->sbuf);
+#endif/*CONFIG_UBIFS_REUSE_LEBMEM*/
 	kfree(c->bottom_up_buf);
 	ubifs_debugging_exit(c);
 
 	/* Finally free U-Boot's global copy of superblock */
 	free(ubifs_sb->s_fs_info);
 	free(ubifs_sb);
+	ubifs_sb = NULL;
 }
 
 /**
@@ -1178,6 +1195,7 @@ int ubifs_mount(char *vol_name)
 		ubifs_umount(ubifs_sb->s_fs_info);
 
 	INIT_LIST_HEAD(&ubifs_infos);
+	INIT_LIST_HEAD(&ubifs_fs_type.fs_supers);
 
 	/*
 	 * Mount in read-only mode
@@ -1186,6 +1204,9 @@ int ubifs_mount(char *vol_name)
 	strcat(name, vol_name);
 	data = NULL;
 	mnt = NULL;
+#ifdef CONFIG_UBIFS_REUSE_LEBMEM
+	ubifs_initialize_lebmem();
+#endif/*CONFIG_UBIFS_REUSE_LEBMEM*/
 	ret = ubifs_get_sb(&ubifs_fs_type, flags, name, data, mnt);
 	if (ret) {
 		printf("Error reading superblock on volume '%s'!\n", name);

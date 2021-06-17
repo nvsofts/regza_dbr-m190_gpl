@@ -637,5 +637,10 @@ static inline int idx2vol_id(const struct ubi_device *ubi, int idx)
 	else
 		return idx;
 }
+#ifdef CONFIG_UBI_REUSE_PEBMEM
+extern void ubi_initialize_pebmem(void);
+extern void* ubi_alloc_pebmem(unsigned int size);
+extern void ubi_release_pebmem(void* p);
+#endif/*CONFIG_UBI_REUSE_PEBMEM*/
 
 #endif /* !__UBI_UBI_H__ */
